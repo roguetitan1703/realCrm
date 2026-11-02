@@ -52,24 +52,30 @@
  */
 import { sql } from './db.js';
 import { getContext } from './context.js';
-import { timezoneOf, FOLLOWUP_OVERDUE, OPEN, OWNER_OPEN } from './store.js';
+import { deskConfigOf, FOLLOWUP_OVERDUE, OPEN, OWNER_OPEN } from './store.js';
 import { CONTACT_EVENT_TYPES } from './leadSegments.js';
-import { CALL_OUTCOMES, WA_OUTCOMES } from '../../../src/data/callOutcomes.js';
+import { outcomeKeysByReach } from '../../../src/data/callOutcomes.js';
 
 export type Side = 'leads' | 'calling';
 
-/** Outcome keys by whether anybody picked up, from the one catalogue. */
-const keysFor = (reach: string) => (CALL_OUTCOMES as any[]).filter(o => o.reach === reach).map(o => o.value);
-const reachOf = sql`(CASE
+/**
+ * Outcome keys by whether anybody picked up, from THE FIRM'S lists (built-ins
+ * plus what it added in Settings → Outcomes, each with its `reach`). `firm` is
+ * `{ outcomes }` from the firm's settings (deskConfigOf).
+ */
+const reachOf = (firm: any) => {
+  const keys = (reach: string) => sql(outcomeKeysByReach(firm, 'call', reach));
+  return sql`(CASE
   WHEN coalesce(e.metadata->>'outcome', '') = '' THEN 'no_outcome'
-  WHEN e.metadata->>'outcome' IN ${sql(keysFor('answered'))} THEN 'answered'
-  WHEN e.metadata->>'outcome' IN ${sql(keysFor('no_answer'))} THEN 'no_answer'
-  WHEN e.metadata->>'outcome' IN ${sql(keysFor('unreachable'))} THEN 'unreachable'
-  WHEN e.metadata->>'outcome' IN ${sql(keysFor('wrong_number'))} THEN 'wrong_number'
+  WHEN e.metadata->>'outcome' IN ${keys('answered')} THEN 'answered'
+  WHEN e.metadata->>'outcome' IN ${keys('no_answer')} THEN 'no_answer'
+  WHEN e.metadata->>'outcome' IN ${keys('unreachable')} THEN 'unreachable'
+  WHEN e.metadata->>'outcome' IN ${keys('wrong_number')} THEN 'wrong_number'
   ELSE 'other' END)`;
-/** A WhatsApp: did the person write back? From the same catalogue's `reach`. */
-const waReplied = (WA_OUTCOMES as any[]).filter(o => o.reach === 'replied').map(o => o.value);
-const waReachOf = sql`(CASE WHEN e.metadata->>'outcome' IN ${sql(waReplied)} THEN 'replied' ELSE 'messaged' END)`;
+};
+/** A WhatsApp: did the person write back? From the same lists' `reach`. */
+const waReachOf = (firm: any) =>
+  sql`(CASE WHEN e.metadata->>'outcome' IN ${sql(outcomeKeysByReach(firm, 'wa', 'replied'))} THEN 'replied' ELSE 'messaged' END)`;
 
 /** Written by a person. System and Import are not anybody's work. */
 const BY_PERSON = sql`coalesce(e.author, 'System') NOT IN ('System', 'Import')
@@ -154,7 +160,7 @@ const contactByDay = (f: any, tz: string) => sql`
  * Every fact for one side of the desk on one day. The single source of every
  * number on both screens and every list they open.
  */
-function facts(side: Side, t: string, tz: string, bounds: Bounds) {
+function facts(side: Side, t: string, tz: string, bounds: Bounds, firm: any) {
   const { d0, d1, d2, isToday } = bounds;
   const table = side === 'leads' ? sql`crm_leads` : sql`crm_owners`;
   const inDay = sql`e.timestamp >= ${d0} AND e.timestamp < ${d1}`;
@@ -164,7 +170,7 @@ function facts(side: Side, t: string, tz: string, bounds: Bounds) {
     SELECT e.author AS person, e.record_id, e.timestamp AS at,
            CASE e.type WHEN 'call' THEN 'call' WHEN 'whatsapp' THEN 'whatsapp'
                        WHEN 'remark' THEN 'note' ELSE 'followup_set' END AS measure,
-           CASE WHEN e.type = 'call' THEN ${reachOf} WHEN e.type = 'whatsapp' THEN ${waReachOf} ELSE NULL END AS detail
+           CASE WHEN e.type = 'call' THEN ${reachOf(firm)} WHEN e.type = 'whatsapp' THEN ${waReachOf(firm)} ELSE NULL END AS detail
       FROM crm_timeline_events e ${onSide}
      WHERE e.tenant_id = ${t} AND ${inDay} AND ${BY_PERSON}
        AND (e.type IN ('call', 'whatsapp')
@@ -313,11 +319,12 @@ const todayIn = (tz: string) => new Intl.DateTimeFormat('en-CA', { timeZone: tz 
  */
 export async function activityDay(opts: { side: Side; date?: string | null; from?: string | null; person?: string | null }) {
   const t = getContext()!.tenantId;
-  const tz = await timezoneOf(t);
+  const desk = await deskConfigOf(t);
+  const tz = desk.timezone;
   const date = validDate(opts.date);
   const from = validFrom(opts.from, date, todayIn(tz));
   const person = allowedPerson(opts.person ?? null);
-  const f = facts(opts.side, t, tz, dayBounds(tz, date, from));
+  const f = facts(opts.side, t, tz, dayBounds(tz, date, from), { outcomes: desk.outcomes });
 
   // `people` is the calls again, counted by person rather than by tap: five
   // calls to one number is five calls and one person. Summing the per-outcome
@@ -402,10 +409,11 @@ export async function activityDay(opts: { side: Side; date?: string | null; from
  */
 export async function activityRecords(opts: { side: Side; date?: string | null; from?: string | null; person?: string | null; measure: string; detail?: string | null }) {
   const t = getContext()!.tenantId;
-  const tz = await timezoneOf(t);
+  const desk = await deskConfigOf(t);
+  const tz = desk.timezone;
   const person = allowedPerson(opts.person ?? null);
   const date = validDate(opts.date);
-  const f = facts(opts.side, t, tz, dayBounds(tz, date, validFrom(opts.from, date, todayIn(tz))));
+  const f = facts(opts.side, t, tz, dayBounds(tz, date, validFrom(opts.from, date, todayIn(tz))), { outcomes: desk.outcomes });
   // The listings behind "listings added" are listings, not calling rows.
   if (opts.measure === 'listing') {
     const rows = await sql`

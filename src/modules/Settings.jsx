@@ -9,6 +9,8 @@ import { copyText } from '../lib/clipboard.js'
 import { useServerData } from '../lib/useServerData.js'
 import ThisDevice from '../components/ThisDevice.jsx'
 import MessageTemplates from '../components/MessageTemplates.jsx'
+import { Folded } from '../components/RangeView.jsx'
+import { outcomeListIn, REACH_CHOICES, reachTitle } from '../data/callOutcomes.js'
 import { OWNER_STATUSES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
 import { isDeskRole } from '../lib/permissions.js'
 import { firmLocale } from '../lib/locale.js'
@@ -27,6 +29,8 @@ const NAV = [
   // Key kept — it is in the URL of every Settings link anyone has sent.
   { key: 'followup', label: 'Response times', icon: 'clock' },
   { key: 'messages', label: 'Message templates', icon: 'wa' },
+  // The words agents pick after a call, a WhatsApp, a visit (callOutcomes.js).
+  { key: 'outcomes', label: 'Outcomes', icon: 'check' },
   // Links and the public catalogue (listing-pages.md §A): how long a link
   // lives, what the catalogue shows, the embed code, and the owner's stop.
   { key: 'sharing', label: 'Sharing', icon: 'share' },
@@ -48,6 +52,9 @@ export default function Settings({ store, topBar, sel }) {
   // Routing edits are held until Save, and held HERE — moving to another
   // Settings section and back is not an answer about whether to keep them.
   const [routingDraft, setRoutingDraft] = useState({})
+  // Outcome edits too, per list, for the same reason — and closing a list is
+  // not throwing away what was typed into it.
+  const [outcomeDraft, setOutcomeDraft] = useState({})
   // The first section they can actually open. Defaulting to 'brand' would land
   // an agent on a blank pane beside a nav that does not list it.
   // A link from a list ("Choose who takes turns") names the section and side.
@@ -63,7 +70,7 @@ export default function Settings({ store, topBar, sel }) {
   return (
     <>
       {topBar({ title: 'Settings' })}
-      <div className="app-body">
+      <div className="app-body set-body">
         <div className="pagewrap">
           <div className="set-shell">
             <nav className="set-nav">
@@ -79,6 +86,7 @@ export default function Settings({ store, topBar, sel }) {
               {section === 'routing' && <RoutingSection store={store} agents={agents} routing={routing} inactiveAgentIds={inactiveAgentIds} draft={routingDraft} setDraft={setRoutingDraft} startSide={sel?.settingsSide} />}
               {section === 'followup' && <ResponseTimesSection store={store} settings={settings} />}
               {section === 'messages' && <MessagesSection store={store} />}
+              {section === 'outcomes' && <OutcomesSection store={store} settings={settings} draft={outcomeDraft} setDraft={setOutcomeDraft} />}
               {section === 'sharing' && <SharingSection store={store} settings={settings} />}
               {/* {section === 'audit' && <AuditSection />} */}
               {section === 'system' && <SystemSection store={store} />}
@@ -783,6 +791,109 @@ function MessagesSection({ store }) {
       <SecHead title="Message templates" />
       <MessageTemplates store={store} />
     </>
+  )
+}
+
+// ---- Outcomes ---------------------------------------------------------------
+// Who: the owner or manager, at a desk. What they want: the words their agents
+// pick after a call, a WhatsApp, or a visit or meeting to be the firm's own —
+// renamed, reordered, hidden, added to. Stored as `outcomes` in the settings
+// (src/data/callOutcomes.js says what a list is; the server checks it). Every
+// outcome stays on the list for good: history points at it, so hiding is how
+// one goes. A new one on a call or a WhatsApp says whether anybody picked up,
+// which is what the Performance page counts.
+const OUTCOME_GROUPS = [
+  { ch: 'call', title: 'After a call', ask: 'Picked up?' },
+  { ch: 'wa', title: 'After a WhatsApp', ask: 'Replied?' },
+  { ch: 'visit', title: 'After a visit or meeting' },
+]
+// What is compared to decide there is something to save.
+const outcomeShape = (rows) => JSON.stringify(rows.map(r => [r.value || '', r.label.trim(), r.reach || '', !!r.hidden]))
+
+function OutcomesSection({ store, settings, draft, setDraft }) {
+  return (
+    <>
+      <SecHead title="Outcomes" />
+      {OUTCOME_GROUPS.map(g => (
+        <OutcomeGroup key={g.ch} group={g} store={store} settings={settings}
+          draft={draft[g.ch]} setDraft={(v) => setDraft(d => ({ ...d, [g.ch]: v }))} />
+      ))}
+    </>
+  )
+}
+
+function OutcomeGroup({ group, store, settings, draft, setDraft }) {
+  const { ch, title, ask } = group
+  const saved = outcomeListIn(settings, ch)
+  const rows = draft?.rows || saved
+  const add = draft?.add || { label: '', reach: '' }
+  const reaches = REACH_CHOICES[ch]
+  const dirty = !!draft?.rows && outcomeShape(draft.rows) !== outcomeShape(saved)
+  const put = (patch) => setDraft({ rows, add, ...patch })
+  const edit = (i, patch) => put({ rows: rows.map((r, j) => (j === i ? { ...r, ...patch } : r)) })
+  const move = (i, dir) => {
+    const next = [...rows]
+    const [got] = next.splice(i, 1)
+    next.splice(i + dir, 0, got)
+    put({ rows: next })
+  }
+  const canAdd = add.label.trim() && (!reaches || add.reach)
+    && !rows.some(r => r.label.trim().toLowerCase() === add.label.trim().toLowerCase())
+  const addOne = () => {
+    if (!canAdd) return
+    put({ rows: [...rows, { label: add.label.trim(), reach: add.reach || undefined }], add: { label: '', reach: '' } })
+  }
+  const blank = rows.some(r => !r.label.trim())
+  const [saving, setSaving] = useState(false)
+  // The draft goes when the server has taken it: it hands back the list with
+  // the new outcomes' keys, and a refused save leaves every edit in place.
+  const save = async () => {
+    setSaving(true)
+    const ok = await store.setOutcomes(ch, rows.map(r => ({
+      ...(r.value ? { value: r.value } : {}), label: r.label.trim(),
+      ...(!r.value && r.reach ? { reach: r.reach } : {}), ...(r.hidden ? { hidden: true } : {}),
+    })))
+    setSaving(false)
+    if (ok) setDraft({ add })
+  }
+  return (
+    <Folded title={title}>
+      <div className="chip-list">
+        {rows.map((r, i) => (
+          <div key={r.value || `new-${i}`} className={'chip-row oc-row' + (r.hidden ? ' oc-hidden' : '')}>
+            <div className="chip-reorder">
+              <button className="icon-mini" disabled={i === 0} onClick={() => move(i, -1)} title="Move up"><Icon name="chevUp" size={12} /></button>
+              <button className="icon-mini" disabled={i === rows.length - 1} onClick={() => move(i, 1)} title="Move down"><Icon name="chevDown" size={12} /></button>
+            </div>
+            <input className={'input chip-in' + (!r.label.trim() ? ' err' : '')} value={r.label} aria-label="Name"
+              onChange={e => edit(i, { label: e.target.value })} />
+            {reaches && <span className="oc-reach">{r.reach ? reachTitle(r.reach) : ''}</span>}
+            <Toggle type="button" on={!r.hidden} aria-pressed={!r.hidden} aria-label={`Show ${r.label}`} title={r.hidden ? 'Hidden' : 'Shown'}
+              onClick={() => edit(i, { hidden: !r.hidden })} />
+          </div>
+        ))}
+      </div>
+      <div className="add-row oc-add">
+        <input className="input" value={add.label} placeholder="New outcome" aria-label="New outcome"
+          onChange={e => put({ add: { ...add, label: e.target.value } })}
+          onKeyDown={e => { if (e.key === 'Enter') addOne() }} />
+        {reaches && (
+          <select className="input oc-reach-pick" value={add.reach} aria-label={ask}
+            onChange={e => put({ add: { ...add, reach: e.target.value } })}>
+            <option value="">{ask}</option>
+            {reaches.map(k => <option key={k} value={k}>{reachTitle(k)}</option>)}
+          </select>
+        )}
+        <Button variant="ghost" size="sm" icon="plus" disabled={!canAdd} onClick={addOne}>Add</Button>
+      </div>
+      {dirty && (
+        <div className="rt-save oc-save">
+          <span className="rt-save-n">Not saved</span>
+          <Button variant="ghost" disabled={saving} onClick={() => setDraft({ add })}>Discard</Button>
+          <Button variant="primary" disabled={saving || blank || rows.every(r => r.hidden)} onClick={save}>{saving ? 'Saving…' : 'Save'}</Button>
+        </div>
+      )}
+    </Folded>
   )
 }
 

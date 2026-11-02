@@ -13,12 +13,13 @@ import { requireTenantAuth } from '../middleware/auth';
 import {
   addTimelineEvent, updateLead, getLeadById,
   getTimelineEventById, updateTimelineEvent, maybeAutoAdvanceStage,
-  addActivity, ACTIVITY_TYPES, ACTIVITY_OUTCOMES, noteOwnerContact, closeFollowUpFor, completeFollowUp,
+  addActivity, ACTIVITY_TYPES, outcomesOf, noteOwnerContact, closeFollowUpFor, completeFollowUp,
   mapEventForClient, canSeeRecord } from '../services/store';
 import { isSafeKey, tenantOfKey } from '../services/media';
 import { audit } from '../services/audit';
 import { assertLeadWrite } from '../lib/permissions';
 import { followUpKindOf } from '../../../src/data/followUpKinds.js';
+import { isOutcomeIn, outcomeKeysByReach, outcomeChannelOf } from '../../../src/data/callOutcomes.js';
 import { bookingRefusedBody } from '../services/followUp';
 
 export const actionsRouter = Router();
@@ -80,11 +81,13 @@ const AUTHOR_EDITABLE_TYPES = new Set(['remark', 'call', 'whatsapp', 'sms', 'fol
  * was regexing display copy and the wording could not be changed without
  * silently breaking it.
  *
- * Both are gone. `metadata.outcome` holds the key now, so this is a set of two
- * keys from src/data/callOutcomes.js and the labels above them are free to say
- * whatever agents actually say.
+ * Both are gone. `metadata.outcome` holds the key now, and which keys mean
+ * "did not get through" is their `reach` in the firm's list
+ * (src/data/callOutcomes.js): the built-in "Call not received" and "Busy or
+ * switched off", and any the firm added with that reach. The labels are free
+ * to say whatever agents actually say.
  */
-const DIDNT_REACH_THEM = new Set(['no_answer', 'unreachable']);
+const DIDNT_REACH_THEM = ['no_answer', 'unreachable'];
 
 /**
  * Edit a remark (or attach outcome+remark to a logged call/message) —
@@ -106,6 +109,15 @@ actionsRouter.patch('/:id/actions/remark/:eventId', async (req: Request, res: Re
     if (!authorId || existing.author !== authorId) {
       return res.status(403).json({ error: 'You can only edit your own entry' });
     }
+    // An outcome from THIS firm's list for this kind of entry — a booked
+    // follow-up call answers from the call list (outcomeChannelOf). The row's
+    // own outcome sent back unchanged is not a choice, so an old row holding a
+    // label from before keys can still have its note edited.
+    const firm = await outcomesOf(req.tenantId!);
+    if (outcome && outcome !== existing.metadata?.outcome) {
+      const channel = outcomeChannelOf(existing.type, existing.description);
+      if (!channel || !isOutcomeIn(firm, channel, outcome)) return res.status(400).json({ error: `Unknown outcome '${outcome}'` });
+    }
     // RAW, not pre-defaulted. This passed `text || existing.description`, and
     // on a locked row that fallback landed in `metadata.remark` — so saving an
     // outcome with no remark wrote the booking's own sentence underneath
@@ -126,7 +138,7 @@ actionsRouter.patch('/:id/actions/remark/:eventId', async (req: Request, res: Re
     // judgment call — so it moves the lead's status on its own, same as a
     // proven site visit. Everything else logged here ("Interested", "Not
     // interested"…) stays a human decision.
-    if (existing.type === 'call' && outcome && DIDNT_REACH_THEM.has(outcome)) {
+    if (existing.type === 'call' && outcome && outcomeKeysByReach(firm, 'call', ...DIDNT_REACH_THEM).includes(outcome)) {
       await maybeAutoAdvanceStage(existing.record_id, 'Call Not Received', 'Nobody answered the call');
     }
     audit({
@@ -164,11 +176,14 @@ actionsRouter.post('/:id/actions/follow-up/done', async (req: Request, res: Resp
     const leadId = String(req.params.id);
     const outcome = String(req.body?.outcome || '').trim();
     const remark = String(req.body?.remark || '').trim();
-    if (!ACTIVITY_OUTCOMES.has(outcome)) return res.status(400).json({ error: 'Pick how it went' });
+    if (!outcome) return res.status(400).json({ error: 'Pick how it went' });
     // Scoped read: a lead this person cannot see is a lead that does not exist.
     const lead = await getLeadById(leadId);
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
     if (!lead.followUp) return res.status(409).json({ error: 'Nothing is booked on this lead' });
+    // A booked call ends the way a call does; a meeting or a demo the way a visit does.
+    const channel = followUpKindOf(lead.followUp.action) === 'call' ? 'call' : 'visit';
+    if (!isOutcomeIn(await outcomesOf(req.tenantId!), channel, outcome)) return res.status(400).json({ error: 'Pick how it went' });
     // A visit is proven or it is not logged (the activity route's photo + GPS).
     if (followUpKindOf(lead.followUp.action) === 'visit') {
       return res.status(409).json({ error: 'A site visit is logged with a photo and location' });
@@ -354,7 +369,7 @@ actionsRouter.post('/:id/actions/activity', async (req: Request, res: Response) 
     }
 
     const outcome = req.body?.outcome ? String(req.body.outcome).trim() : null;
-    if (outcome && !ACTIVITY_OUTCOMES.has(outcome)) {
+    if (outcome && !isOutcomeIn(await outcomesOf(req.tenantId!), outcomeChannelOf(type, '') || 'visit', outcome)) {
       return res.status(400).json({ error: `Unknown outcome '${outcome}'` });
     }
 

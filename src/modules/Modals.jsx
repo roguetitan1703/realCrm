@@ -21,8 +21,8 @@ import CameraCapture from '../components/CameraCapture.jsx'
 import { getNestedValue, setNestedValue } from '../components/ModuleFields.jsx'
 import { MODULE_DEFINITIONS } from './definitions.jsx'
 import { localities, projectNames } from '../lib/suggest.js'
-import { CALL_OUTCOMES, WA_OUTCOMES, VISIT_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
-import { FOLLOW_UP_ACTIONS, DEFAULT_FOLLOW_UP_ACTION } from '../data/followUpKinds.js'
+import { outcomeList, outcomeLabel } from '../data/callOutcomes.js'
+import { FOLLOW_UP_ACTIONS, DEFAULT_FOLLOW_UP_ACTION, followUpKindOf } from '../data/followUpKinds.js'
 import { ActivityRecords } from '../components/ActivityDay.jsx'
 import { CloseDealModal, AgreementModal } from '../components/Agreements.jsx'
 import SendSheet, { SenderPhone } from './SendSheet.jsx'
@@ -631,7 +631,7 @@ function LogCallModal({ store, leadId, recordType = 'lead', recordId, record, ev
 
   const save = () => {
     setBusy(true)
-    const label = labelForOutcome(outcome) || 'Call recorded'
+    const label = outcomeLabel(outcome, 'call') || 'Call recorded'
     // The KEY goes to the server, the label only to the toast. This used to
     // send `label`, so metadata.outcome held "No answer" — display copy doing
     // the work of a key, which meant renaming an option silently orphaned every
@@ -663,7 +663,7 @@ function LogCallModal({ store, leadId, recordType = 'lead', recordId, record, ev
       <Field label="What happened">
         <select className="input" value={outcome} onChange={e => setOutcome(e.target.value)}>
           <option value="">Pick one</option>
-          {CALL_OUTCOMES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          {outcomeList('call').map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       </Field>
       {booksCallback && <WhenPicker w={w} />}
@@ -1701,7 +1701,7 @@ const CHANNELS = {
 // Which outcome list a channel is asked from. Email has none — nothing sends
 // one from here yet, and an empty dropdown teaches people to skip the control.
 const outcomesFor = (channel) =>
-  (channel === 'call' ? CALL_OUTCOMES : channel === 'wa' ? WA_OUTCOMES : null)
+  (channel === 'call' || channel === 'wa' ? outcomeList(channel) : null)
 
 function ContactConfirmModal({ store, channel, name, phone, email, waText, recordType, recordId }) {
   const [step, setStep] = useState('confirm')   // 'confirm' | 'outcome'
@@ -1936,7 +1936,7 @@ function FollowUpDoneModal({ store, leadId, draft }) {
   }
   return (
     <Modal title={`${followUpAction(l.followUp) || 'Follow-up'}: ${personLabel(l)}`} onClose={store.closeModal} width={420}>
-      <OutcomeForm line={followUpLabel(l.followUp)} outcomes={VISIT_OUTCOMES} blank="How did it go?"
+      <OutcomeForm line={followUpLabel(l.followUp)} outcomes={outcomeList(followUpKindOf(l.followUp.action) === 'call' ? 'call' : 'visit')} blank="How did it go?"
         outcome={outcome} onOutcome={setOutcome} text={note} onText={setNote} placeholder="What happened?"
         autoFocus={false} footClass="mfm-foot" onCancel={store.closeModal} onSave={save} />
     </Modal>
@@ -1957,9 +1957,7 @@ function FollowUpDoneModal({ store, leadId, draft }) {
 // Every one of these is re-checked server-side. The UI ordering is a courtesy
 // to the agent, not the enforcement.
 // ============================================================================
-// VISIT_OUTCOMES now lives in src/data/callOutcomes.js beside the call and
-// message vocabularies — it was a second copy keyed on `key` while the timeline
-// kept a third as a label map.
+// The outcomes are the firm's visit list (src/data/callOutcomes.js outcomeList).
 
 function VisitProofModal({ store, leadId, propId }) {
   const l = store.lookup('lead', leadId)
@@ -2108,7 +2106,7 @@ function VisitProofModal({ store, leadId, propId }) {
 
           <Field label="What came of it?">
             <div className="vp-outcomes">
-              {VISIT_OUTCOMES.map(o => (
+              {outcomeList('visit').map(o => (
                 <button
                   key={o.value}
                   type="button"

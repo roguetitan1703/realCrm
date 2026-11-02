@@ -20,6 +20,8 @@
 // in routes/actions.ts had to regex English; and renaming an option would have
 // orphaned every row already written. The 46 rows that existed were migrated to
 // keys by 2026_08_18_outcome_keys (services/db.ts).
+import { followUpKindOf } from './followUpKinds.js'
+
 const o = (value, label, reach) => (reach ? { value, label, reach } : { value, label })
 
 // `reach` is whether somebody picked up, and it is the ONLY place that is
@@ -114,11 +116,6 @@ export const WA_OUTCOMES = [
   o('wa_no_reply', 'No reply yet', 'messaged'),
 ]
 
-// Both lists, one lookup. A caller asking for the label of an outcome should
-// not have to know which channel produced it.
-export const labelForOutcome = (value) =>
-  [...CALL_OUTCOMES, ...WA_OUTCOMES].find(x => x.value === value)?.label || ''
-
 // ── How a visit, a meeting or a demo ended ──────────────────────────────────
 // Two copies of this existed: VISIT_OUTCOMES in Modals.jsx keyed on `key`, and
 // VISIT_OUTCOME_LABEL in primitives.jsx as a plain map. Same five outcomes,
@@ -137,3 +134,99 @@ export const VISIT_OUTCOMES = [
   o('not_interested', 'Not interested'),
   o('no_show', 'No show'),
 ]
+
+// ============================================================================
+// THE FIRM'S OWN WORDS — Settings → Outcomes
+// ============================================================================
+// The three lists above are the BUILT-INS. A firm's owner may rename one, hide
+// one, reorder them, and add its own; that lives in crm_settings as
+// `outcomes: { call?: [...], wa?: [...], visit?: [...] }`, each item
+// `{ value, label?, reach?, hidden? }`. A channel the firm never edited is
+// absent and reads as the built-ins — nothing is written to make that true.
+//
+// Built-ins cannot be deleted (history points at their keys) and their `reach`
+// is theirs: "Call not received" is what the Performance page and the
+// auto-advance count as nobody picking up, whatever the firm calls it. An
+// outcome the firm adds carries a reach it chose, gets a key the server mints
+// (`c_site_tour_1`), and is never deleted either — hidden is how it goes away,
+// so a key is never reused for a different meaning.
+//
+// Every picker and every label reads these two functions, the browser through
+// the table the store sets (setFirmOutcomes), the server through the settings
+// row (outcomeListIn / outcomeLabelIn).
+// ============================================================================
+
+export const BUILTIN_OUTCOMES = { call: CALL_OUTCOMES, wa: WA_OUTCOMES, visit: VISIT_OUTCOMES }
+export const OUTCOME_CHANNELS = ['call', 'wa', 'visit']
+/** The reaches a firm may give an outcome it adds, per channel. */
+export const REACH_CHOICES = { call: ['answered', 'no_answer', 'unreachable', 'wrong_number'], wa: ['replied', 'messaged'] }
+/** Key prefix for an outcome a firm adds. */
+export const ADDED_PREFIX = { call: 'c_', wa: 'w_', visit: 'v_' }
+
+/**
+ * Every outcome on a channel for a firm, hidden ones included (each carries
+ * `hidden: true`), in the firm's order. `cfg` is the firm's settings object.
+ */
+export function outcomeListIn(cfg, channel) {
+  const base = BUILTIN_OUTCOMES[channel] || []
+  const stored = cfg?.outcomes?.[channel]
+  if (!Array.isArray(stored)) return base.map(x => ({ ...x, builtin: true }))
+  const seen = new Set()
+  const out = []
+  for (const s of stored) {
+    if (!s || typeof s.value !== 'string' || seen.has(s.value)) continue
+    const b = base.find(x => x.value === s.value)
+    // A stored key that is neither built in nor added by the firm is not
+    // something anybody can have picked — dropped rather than guessed at.
+    if (!b && !s.value.startsWith(ADDED_PREFIX[channel])) continue
+    seen.add(s.value)
+    const label = String(s.label || '').trim() || b?.label || s.value
+    const reach = b ? b.reach : s.reach
+    out.push({ value: s.value, label, ...(reach ? { reach } : {}), ...(s.hidden ? { hidden: true } : {}), ...(b ? { builtin: true } : {}) })
+  }
+  // A built-in missing from what was stored is still a built-in.
+  for (const b of base) if (!seen.has(b.value)) out.push({ ...b, builtin: true })
+  return out
+}
+
+/** What a stored outcome reads as, for a firm. `channel` first when known; a raw string (rows from before keys) unchanged. */
+export function outcomeLabelIn(cfg, value, channel) {
+  if (!value) return ''
+  const order = channel && OUTCOME_CHANNELS.includes(channel) ? [channel, ...OUTCOME_CHANNELS.filter(c => c !== channel)] : OUTCOME_CHANNELS
+  for (const c of order) {
+    const hit = outcomeListIn(cfg, c).find(x => x.value === value)
+    if (hit) return hit.label
+  }
+  return value
+}
+
+/** Outcome keys on a channel, for a firm, whose reach is one of `reaches`. Hidden ones too: old rows still count. */
+export const outcomeKeysByReach = (cfg, channel, ...reaches) =>
+  outcomeListIn(cfg, channel).filter(x => reaches.includes(x.reach)).map(x => x.value)
+
+/** Is `value` an outcome this firm has on this channel (hidden counts — it was once pickable)? */
+export const isOutcomeIn = (cfg, channel, value) => outcomeListIn(cfg, channel).some(x => x.value === value)
+
+/**
+ * Which list a timeline entry is answered from. A booked follow-up that is a
+ * CALL ends the way a call does — it offered the visit list ("No show") while
+ * the call itself offered the call list. `line` is the entry's text, which
+ * names the booking ("Follow-up Call, 20 Aug, 11:00 am").
+ */
+export function outcomeChannelOf(type, line) {
+  if (type === 'call') return 'call'
+  if (type === 'wa' || type === 'whatsapp' || type === 'sms') return 'wa'
+  if (type === 'followup' || type === 'follow_up') return followUpKindOf(line) === 'call' ? 'call' : 'visit'
+  if (type === 'visit' || type === 'site_visit' || type === 'meeting') return 'visit'
+  return null
+}
+
+// The browser's copy, for this tab's workspace (one per tab: the URL is the
+// authority), set by the store in render whenever the settings arrive — the
+// same way stage names are (pipelineRoles.js setStageLabels).
+let FIRM = {}
+export function setFirmOutcomes(outcomes) { FIRM = { outcomes: outcomes && typeof outcomes === 'object' ? outcomes : undefined } }
+/** What a picker offers: the firm's visible outcomes on a channel. `keep` keeps a hidden one that is already chosen. */
+export const outcomeList = (channel, keep) => outcomeListIn(FIRM, channel).filter(x => !x.hidden || (keep && x.value === keep))
+/** What a stored outcome reads as on screen. */
+export const outcomeLabel = (value, channel) => outcomeLabelIn(FIRM, value, channel)
