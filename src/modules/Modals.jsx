@@ -138,7 +138,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'reassign' && <ReassignModal store={store} fromId={m.fromId} />}
       {m?.kind === 'addAgent' && <AddAgentModal store={store} />}
       {m?.kind === 'contact' && <ContactConfirmModal store={store} channel={m.channel} name={m.name} phone={m.phone} email={m.email} waText={m.waText} recordType={m.recordType} recordId={m.recordId} />}
-      {m?.kind === 'remark' && <RemarkModal store={store} recordType={m.recordType} recordId={m.recordId} />}
+      {m?.kind === 'remark' && <RemarkModal store={store} recordType={m.recordType} recordId={m.recordId} draft={m.draft} />}
       {m?.kind === 'propStatus' && <StatusModal store={store} propId={m.propId} />}
       {m?.kind === 'visitFeedback' && <VisitFeedbackModal store={store} leadId={m.leadId} propId={m.propId} />}
       {m?.kind === 'visitProof' && <VisitProofModal store={store} leadId={m.leadId} propId={m.propId} />}
@@ -1209,14 +1209,13 @@ function RejectOwnerModal({ store, ownerId, status }) {
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const save = async () => {
+  // Closes at once; the row moves with it and goes back, with a toast, if the
+  // server refuses (rejectOwner).
+  const save = () => {
     setBusy(true)
     const text = note.trim() ? `${pick.reason}: ${note.trim()}` : pick.reason
-    const ok = await store.updateOwner(ownerId, { stage: pick.status, rejectionReason: pick.reason, callbackAt: null })
-    if (!ok) { setBusy(false); return }
-    await store.addRemark('owner', ownerId, `Closed: ${text}`)
-    setBusy(false)
     store.closeModal()
+    store.rejectOwner(ownerId, { stage: pick.status, rejectionReason: pick.reason, callbackAt: null, callbackNote: null }, `Closed: ${text}`)
   }
 
   return (
@@ -1884,16 +1883,17 @@ function OwnerCallbackModal({ store, ownerId }) {
 }
 
 // ---- Add remark (B1): a threaded, timestamped note on a lead or property ----
-function RemarkModal({ store, recordType, recordId }) {
-  const [text, setText] = useState('')
-  const [busy, setBusy] = useState(false)
-  const submit = async () => {
-    if (busy) return
+// Closes on Send: the remark is on the record at once (addRemark is
+// optimistic). Refused, it comes back here with the words still in it.
+function RemarkModal({ store, recordType, recordId, draft = '' }) {
+  const [text, setText] = useState(draft)
+  const submit = () => {
     if (!text.trim()) { store.toast('Type a remark first', 'warn'); return }
-    setBusy(true)
-    const ok = await store.addRemark(recordType, recordId, text.trim())
-    setBusy(false)
-    if (ok) store.closeModal()
+    const said = text.trim()
+    store.closeModal()
+    store.addRemark(recordType, recordId, said).then(ok => {
+      if (!ok) store.openModal({ kind: 'remark', recordType, recordId, draft: said })
+    })
   }
   return (
     <Modal title="Add remark" onClose={store.closeModal} width={400}>
@@ -2648,19 +2648,19 @@ function ScheduleFollowUpModal({ store, leadId, callback = false }) {
 
   if (!l) return null
 
-  const saveAppointment = async () => {
+  // Closes on Save: both writes are optimistic, so the row shows the booking
+  // at once and a refusal puts it back with a toast.
+  const saveAppointment = () => {
     if (busy || !w.at) return
     setBusy(true)
     const fu = bookingOf(action, w, note.trim())
-    const res = callback ? await store.setCallback(l.id, fu) : await store.setFollowUp(l.id, fu)
+    store.closeModal()
     // NO addNote HERE. This wrote the booking into the timeline as a plain
     // remark — editable, pencil and all — so the record of an appointment being
     // made could be rewritten into any sentence at all. updateLead writes it
     // server-side now, as its own type. See the follow_up block in store.ts.
-    setBusy(false)
-    if (!res) return
-    if (!callback) store.toast(`Follow-up scheduled: ${action} on ${w.date} at ${w.timeText}`)
-    store.closeModal()
+    if (callback) store.setCallback(l.id, fu)
+    else store.setFollowUp(l.id, fu, `Follow-up scheduled: ${action} on ${w.date} at ${w.timeText}`)
   }
 
   return (

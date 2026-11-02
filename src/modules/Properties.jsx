@@ -217,7 +217,8 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
   // promise listings its list cannot find.
   const source = useServerList(
     (params) => api.listProperties(toQuery({ ...params, tab: tab === 'all' ? undefined : tab })),
-    { filters: flt, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone },
+    // Grouped by project shows cards, not this page of rows.
+    { filters: flt, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone, off: view === 'projects' },
     [state.dataAsOf, tab],
     { store, kind: 'property' },
   )

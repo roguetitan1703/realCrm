@@ -102,7 +102,7 @@ export function AgreementCard({ a, store, onChanged, show = {} }) {
 export function useAgreementsFor(query, store) {
   const [nonce, setNonce] = useState(0)
   const key = JSON.stringify(query)
-  const { data } = useServerData(() => api.listAgreements({ ...query, limit: 50 }), [key, nonce, store.state.dataAsOf], null)
+  const { data } = useServerData(() => api.listAgreements({ ...query, limit: 50 }), [key, nonce, store.asOf('lead', 'owner', 'property')], null)
   return { rows: data?.rows || null, refresh: () => setNonce(n => n + 1) }
 }
 

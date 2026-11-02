@@ -20,6 +20,7 @@ import { api, hasPendingWrites } from './api.js'
 const FETCHERS = {
   property: (id) => api.getProperty(id).then(r => r?.property || null),
   lead: (id) => api.getLead(id).then(r => r?.lead || r?.record || null),
+  owner: (id) => api.getOwner(id).then(r => r?.owner || null),
 }
 
 /**
@@ -59,6 +60,10 @@ export function useRecord(store, kind, id) {
     if (!id) { setState({ loading: false, error: null }); return }
     const key = `${kind}:${id}`
     if (seen.current.key !== key) seen.current = { key, tick: full ? tick : -1 }
+    // THE WRITE ALREADY ANSWERED. A write whose reply is the whole record
+    // (store adopt()) marks it with the tick it settles at; reading it again
+    // asked the server what it had just said.
+    if (full && known.__tick === tick) seen.current = { key, tick }
     if (full && seen.current.tick === tick) { setState({ loading: false, error: null }); return }
     const fetcher = FETCHERS[kind]
     if (!fetcher) { setState({ loading: false, error: `No fetcher for ${kind}` }); return }

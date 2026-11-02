@@ -45,7 +45,7 @@ export default function Dashboard({ store, go, topBar }) {
   // The going-cold LIST is gone from this screen: it was the tile above printed
   // a second time, six rows of it, and "who is this happening to" is a question
   // the per-agent table answers for the whole desk in one row each.
-  const { data: ownerSummary, loading: ownerLoading } = useServerData(() => api.getOwnersSummary(), [state.dataAsOf], null, '/owners/summary')
+  const { data: ownerSummary, loading: ownerLoading } = useServerData(() => api.getOwnersSummary(), [store.asOf('lead', 'property')], null, '/owners/summary')
   // THE PAGE ARRIVES AS ONE. Until both reads have answered (or failed) it
   // shows grey blocks where the sections go, instead of the calling queue
   // appearing late above everything and Team today, lowest on the page, being

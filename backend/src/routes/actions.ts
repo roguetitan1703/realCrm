@@ -306,6 +306,8 @@ actionsRouter.post(
         record_id: recordId,
         new_stage_id: new_stage_id,
         audit_note: note ?? null,
+        // The record as it now stands, so the client need not read it again.
+        data: moved,
       });
     } catch (err: any) {
       const refused = bookingRefusedBody(err); if (refused) return res.status(422).json(refused);

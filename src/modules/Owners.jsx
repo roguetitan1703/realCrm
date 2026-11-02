@@ -8,6 +8,7 @@ import { initials, callbackSignal, whenLabel } from '../lib/format.js'
 import { canAssignLead, isDeskRole } from '../lib/permissions.js'
 import { OWNER_STAGES, OWNER_TERMINAL_STATUSES, ownerSegmentsOf, isCallbackTab } from '../data/ownerStatus.js'
 import { useServerList } from '../lib/serverList.js'
+import { useRecord } from '../lib/useRecord.js'
 import { useKept, useKeptPager } from '../lib/useNav.js'
 import { useServerData } from '../lib/useServerData.js'
 import UnassignedBar from '../components/UnassignedBar.jsx'
@@ -82,13 +83,12 @@ function OwnerProjectGrid({ store, ask, def, phone, onOpen, onOpenOwner, onAssig
 // Owners) because it holds hooks of its own — rendering it from partway through
 // the list component would change the hook count between the two views.
 function OwnerRecord({ store, ownerId, topBar, phone, onBack, go }) {
-  const cached = store.lookup('owner', ownerId)
-  // Reload or a deep link lands here with nothing cached. Fetching also gets
-  // the timeline, which the list rows never carry.
-  const { data: fetched } = useServerData(
-    () => api.getOwner(ownerId).then(r => r?.owner || null),
-    [ownerId, store.state.dataAsOf], null)
-  const o = fetched || cached
+  // THE CACHED RECORD, which every write patches. This read
+  // `fetched || cached`, so a copy fetched before a status change or a
+  // callback beat the patched one and the record showed the old value until
+  // the next read. useRecord fetches what the cache lacks (a list row has no
+  // history), keeps it in the cache, and does not re-read a write's own reply.
+  const { record: o } = useRecord(store, 'owner', ownerId)
   if (!o) {
     return (
       <>
@@ -263,6 +263,10 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   // A checked row belongs to the list it was checked in.
   useEffect(() => { clearSel() }, [view, projectSel])
 
+  // Calling's refetch token: moves with owner writes and untyped ones, not
+  // with a lead or a listing written (asOf, store.jsx).
+  const ownersAsOf = store.asOf('lead', 'property')
+
   // ONE SET OF PARAMETERS for the rows and for the tab counts, so a tab can
   // never promise rows its list cannot find.
   const scope = {
@@ -284,17 +288,23 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     }),
     // Same as Leads: a row you just called keeps its place in the queue.
     { filters: {}, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone,
-      holdOrder: true, viewDeps: [tab, status, agentSel, projectSel, towerSel, configSel, phone] },
-    [state.dataAsOf, tab, status, agentSel, projectSel, towerSel, configSel, phone],
+      holdOrder: true, viewDeps: [tab, status, agentSel, projectSel, towerSel, configSel, phone],
+      // Grouped by project shows cards, not this page of rows.
+      off: view === 'projects' },
+    // Calling reads owners: a lead or a listing written cannot change them.
+    [ownersAsOf, tab, status, agentSel, projectSel, towerSel, configSel, phone],
     { store, kind: 'owner' },
   )
   const { data: counts } = useServerData(
     // The dropdown's status only: a step tab is counted across, not within.
     () => api.getOwnerTabs({ ...scope, segment, stage: status }).then(r => r?.tabs || {}),
-    [state.dataAsOf, q, tab, status, agentSel, projectSel, towerSel, configSel, phone], {})
+    [ownersAsOf, q, tab, status, agentSel, projectSel, towerSel, configSel, phone], {})
 
+  // The picked project's towers, for the Tower filter. Without a project there
+  // is no tower to offer, and this was a second firm-wide project read beside
+  // the cards' own on every load.
   const { data: projectList } = useServerData(
-    () => api.listOwnerProjects().then(r => r?.data || []), [state.dataAsOf], [])
+    () => (projectSel ? api.listOwnerProjects().then(r => r?.data || []) : Promise.resolve([])), [ownersAsOf, !!projectSel], [])
   const currentProject = (projectList || []).find(p => (p.key === 'No project' ? '_none' : p.key) === projectSel)
   const facets = {
     towers: (currentProject?.towers || []).map(t => ({ value: t, label: t })),
@@ -447,7 +457,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
           store={store} picking={picking} selection={selection}
           ask={{ ...(q ? { q } : {}), ...(scope.mine ? { mine: 1 } : {}) }}
           def={def} phone={phone} onOpenOwner={open}
-          refreshAt={state.dataAsOf}
+          refreshAt={ownersAsOf}
           canAssign={canAssign}
           onAssign={(pj) => store.openModal({ kind: 'assignProject', project: pj })}
           onOpen={(key) => toProject(key === 'No project' ? '_none' : key)} />

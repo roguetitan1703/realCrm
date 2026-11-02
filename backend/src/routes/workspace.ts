@@ -78,14 +78,21 @@ workspaceRouter.get('/audit', async (req: Request, res: Response) => {
  * no listings — screens read those for themselves, a page at a time.
  *
  */
-workspaceRouter.get('/bootstrap', async (_req: Request, res: Response) => {
+workspaceRouter.get('/bootstrap', async (req: Request, res: Response) => {
   try {
     // `env` alongside the state, so the marker survives a reload that never
     // touches the unauthenticated resolve.
     // `billing` beside the state, not in it: the state is cached for offline
     // reads, and a payment notice from a cache is a notice nobody can clear.
-    const [state, billing] = await Promise.all([getBootstrap(), billingNotice().catch(() => undefined)]);
-    return res.status(200).json({ success: true, env: appEnv(), state, billing });
+    // `unread`, the bell's number, likewise: it was a request of its own on
+    // every load, sent at the same moment as this one.
+    const userId = req.user?.id;
+    const [state, billing, unread] = await Promise.all([
+      getBootstrap(),
+      billingNotice().catch(() => undefined),
+      userId ? unreadCount(userId).catch(() => undefined) : 0,
+    ]);
+    return res.status(200).json({ success: true, env: appEnv(), state, billing, unread });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to bootstrap', message: err.message });
   }
@@ -245,7 +252,7 @@ workspaceRouter.get('/resolve', async (req: Request, res: Response) => {
  * token moves. Never cached — a cached pulse is a pulse that reports nothing
  * ever happens.
  */
-import { processScheduledNotifications } from '../services/notifications.js';
+import { processScheduledNotifications, unreadCount } from '../services/notifications.js';
 
 workspaceRouter.get('/pulse', async (req: Request, res: Response) => {
   processScheduledNotifications().catch(() => {});

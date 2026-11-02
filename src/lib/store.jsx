@@ -21,6 +21,9 @@ import { isOpen, CALLBACK_STATUS } from '../data/leadStatus.js'
 import { canWork, isNotWorkable, notWorkableText } from './workforce.js'
 import { reloadIfNewBuild } from './appVersion.js'
 
+// What a write can say it touched (MUTATED, asOf()).
+const WRITE_KINDS = ['lead', 'owner', 'property']
+
 // Pending shortlist writes, per lead (see changeShortlist).
 const shortlistQueue = new Map()
 
@@ -291,6 +294,10 @@ function freshState() {
     // their deps, so a mutation refreshes the page you are looking at without
     // a full reload of the workspace. See `settled()` below.
     mutationTick: 0,
+    // When each kind of record was last written, and `all` when everything
+    // was (a refresh, or a write that did not say what it touched). A read
+    // that cannot change with some kind of write keys on asOf() without it.
+    asOf: {},
     dataStale: false,    // true when we're showing a cached snapshot (offline read)
     // What the firm owes Delpat, from boot and every pulse (billing.md). null:
     // no subscription, or nothing for this person to see. Never cached.
@@ -361,7 +368,13 @@ function reducer(state, action) {
         settings: s.settings ? { ...state.settings, ...s.settings } : state.settings,
         routing: s.routing_rules ? { ...state.routing, ...s.routing_rules } : state.routing,
         brand: s.brand ? { ...state.brand, ...s.brand } : state.brand,
-        dataAsOf: action.at || Date.now(),
+        // MOVED ONLY WHEN THE DESK DID. Every screen refetches when this moves,
+        // and the boot read lands a second after those screens asked: moving
+        // it then sent each of them again (the unassigned bar, which skips the
+        // read cache, twice per load). The pulse's read, sent because the
+        // change token moved, is the one that means "look again".
+        dataAsOf: action.refresh ? Date.now() : state.dataAsOf,
+        asOf: action.refresh ? { ...state.asOf, all: Date.now() } : state.asOf,
         dataStale: false,   // fresh from the server
       }
     }
@@ -419,7 +432,9 @@ function reducer(state, action) {
       for (const r of action.records || []) if (r?.id) {
         const prev = next[r.id]
         delete next[r.id]
-        if (!action.partial) { next[r.id] = r; continue }
+        // A write's own reply: the record as of the write about to settle, so
+        // useRecord need not ask for it again (see adopt()).
+        if (!action.partial) { next[r.id] = action.adopted ? { ...r, __tick: (state.mutationTick || 0) + 1 } : r; continue }
         const row = { ...r }
         for (const k of keep) delete row[k]
         next[r.id] = (prev && !prev.__partial)
@@ -473,10 +488,15 @@ function reducer(state, action) {
     // work until the first screen someone forgot.
     //
     // No loop: only a write dispatches this, and a refetch is not a write.
+    //
+    // `kind` says what the write touched ('lead', 'owner', 'property'). Every
+    // read on dataAsOf still moves; a read keyed on asOf(...) skips the kinds
+    // it names. An untyped write moves them all.
     case 'MUTATED': return {
       ...state,
       mutationTick: (state.mutationTick || 0) + 1,
       dataAsOf: Date.now(),
+      asOf: { ...state.asOf, [action.kind || 'all']: Date.now() },
     }
 
     // Real, server-persisted remark events (B1) — kind picks the array so the
@@ -484,6 +504,11 @@ function reducer(state, action) {
     case 'ADD_TIMELINE_EVENT':
       return patchRecord(state, action.kind, action.id, r => ({
         ...r, timeline: [action.event, ...(r.timeline || [])],
+      }))
+    // A remark shown before the server had it, and then refused.
+    case 'DROP_TIMELINE_EVENT':
+      return patchRecord(state, action.kind, action.id, r => ({
+        ...r, timeline: (r.timeline || []).filter(e => e.id !== action.eventId),
       }))
     case 'EDIT_TIMELINE_EVENT':
       return patchRecord(state, action.kind, action.id, r => ({
@@ -791,6 +816,25 @@ export function StoreProvider({ children }) {
   setFirmLocale(state.settings?.locale)
   const timers = useRef({})
 
+  // Pull the current user's alert feed. No-op without a token (the feed is
+  // per-user, so it needs an authenticated identity).
+  const loadNotifications = useCallback(() => {
+    if (!apiClient.getToken?.()) return
+    apiClient.getNotifications()
+      .then(res => { if (res?.success) dispatch({ type: 'SET_NOTIFICATIONS', notifications: res.notifications, unread: res.unread }) })
+      .catch(err => console.warn('[Notifications] load failed:', err.message))
+  }, [])
+
+  // The bell's number, without the pile behind it. This is what boot and the
+  // pulse poll want: the drawer's rows are fetched when the drawer opens, and
+  // fetching them on every page load was the single biggest read on the desk.
+  const loadNotifUnread = useCallback(() => {
+    if (!apiClient.getToken?.()) return
+    apiClient.getNotifUnread()
+      .then(res => { if (res?.success) dispatch({ type: 'SET_NOTIFICATIONS', notifications: null, unread: res.unread }) })
+      .catch(err => console.warn('[Notifications] count failed:', err.message))
+  }, [])
+
   // Pull the authoritative, tenant-scoped state from the backend. Called on
   // mount AND right after login — the token/tenant changes at login, so the
   // desk must re-fetch under the new identity or it keeps showing whatever
@@ -808,10 +852,14 @@ export function StoreProvider({ children }) {
     return apiClient.getBootstrap()
       .then(res => {
         if (res && res.success && res.state) {
-          dispatch({ type: 'HYDRATE_SERVER', state: res.state })
+          dispatch({ type: 'HYDRATE_SERVER', state: res.state, refresh: background })
           writeStateCache(res.state)   // keep a snapshot for the next offline load
           // Absent (the server could not read it) keeps what we had.
           if ('billing' in res) dispatch({ type: 'SET_BILLING', billing: res.billing })
+          // The bell's number rides on the same read. An API older than this
+          // build does not send it, and then the count is asked for itself.
+          if (typeof res.unread === 'number') dispatch({ type: 'SET_NOTIFICATIONS', notifications: null, unread: res.unread })
+          else loadNotifUnread()
         }
       })
       .catch(err => {
@@ -835,7 +883,7 @@ export function StoreProvider({ children }) {
         const cached = readStateCache()
         if (cached) dispatch({ type: 'HYDRATE_CACHE', state: cached.state, at: cached.at })
       })
-  }, [])
+  }, [loadNotifUnread])
 
   // A SESSION CAN END WHILE THE APP IS OPEN.
   //
@@ -867,9 +915,8 @@ export function StoreProvider({ children }) {
   // 401 and make a signed-out app look like a backend outage.
   useEffect(() => {
     if (!apiClient.getToken?.()) return
+    // The bell's NUMBER comes with it, not the pile behind it.
     loadServerState()
-    // The bell's NUMBER, not the pile behind it.
-    loadNotifUnread()
   }, [])
 
   // Paint the desk in the tenant's accent whenever it changes (hydrate, edit,
@@ -918,25 +965,6 @@ export function StoreProvider({ children }) {
     // note in lib/pwa.js.
     applyPwaIdentity(tid, state.settings.firmName)
   }, [state.settings.firmName, state.settings.city, state.brand?.primaryColor, state.brand?.logoUrl, state.tenant?.slug, state.tenant?.id])
-
-  // Pull the current user's alert feed. No-op without a token (the feed is
-  // per-user, so it needs an authenticated identity).
-  const loadNotifications = useCallback(() => {
-    if (!apiClient.getToken?.()) return
-    apiClient.getNotifications()
-      .then(res => { if (res?.success) dispatch({ type: 'SET_NOTIFICATIONS', notifications: res.notifications, unread: res.unread }) })
-      .catch(err => console.warn('[Notifications] load failed:', err.message))
-  }, [])
-
-  // The bell's number, without the pile behind it. This is what boot and the
-  // pulse poll want: the drawer's rows are fetched when the drawer opens, and
-  // fetching them on every page load was the single biggest read on the desk.
-  const loadNotifUnread = useCallback(() => {
-    if (!apiClient.getToken?.()) return
-    apiClient.getNotifUnread()
-      .then(res => { if (res?.success) dispatch({ type: 'SET_NOTIFICATIONS', notifications: null, unread: res.unread }) })
-      .catch(err => console.warn('[Notifications] count failed:', err.message))
-  }, [])
 
   // ── Live refresh ──────────────────────────────────────────────────────────
   // The desk used to load once and then quietly go stale: a lead routed in by a
@@ -996,7 +1024,6 @@ export function StoreProvider({ children }) {
           pulseRef.current = token
           quiet = 0
           await loadServerState(true)
-          loadNotifUnread()
         } else {
           quiet++
         }
@@ -1162,7 +1189,9 @@ export function StoreProvider({ children }) {
    * bumping first would re-fetch the old rows and visibly undo the optimistic
    * update a moment before the write lands.
    */
-  const settled = useCallback(() => dispatch({ type: 'MUTATED' }), [])
+  // `kind` — what the write touched, when only one kind of record: see MUTATED.
+  // Called bare as a handler too, so anything but a string is "everything".
+  const settled = useCallback((kind) => dispatch({ type: 'MUTATED', kind: typeof kind === 'string' ? kind : undefined }), [])
 
   // The whole lead: the cached one when it is the full record, otherwise read.
   const fullLead = (leadId) => {
@@ -1251,16 +1280,16 @@ export function StoreProvider({ children }) {
       if (!q.ops.length) shortlistQueue.delete(leadId)
       if (shortlisted) toast(shortlisted === 1 ? 'Shortlisted' : `${shortlisted} shortlisted`)
       // Once per burst, not per send: every list on screen refetches on this.
-      if (sent) settled()
+      if (sent) settled('lead')
     }
   }
 
-  const write = useCallback((what, call, apply, okMsg) => call()
+  const write = useCallback((what, call, apply, okMsg, kind) => call()
     .then(res => {
       if (rejected(res)) throw new Error(res.error || 'rejected')
       if (apply) apply(res)
       if (okMsg) toast(okMsg)
-      settled()
+      settled(kind)
       return res
     })
     .catch(err => { failed(err, what); return null }), [failed, toast, settled])
@@ -1272,22 +1301,29 @@ export function StoreProvider({ children }) {
   // update returns its columns without its history.
   const adopt = useCallback((kind, partial) => (res) => {
     const rec = res?.data
-    if (rec?.id) dispatch({ type: 'CACHE_RECORDS', kind, records: [rec], partial })
+    if (rec?.id && res?.success !== false) dispatch({ type: 'CACHE_RECORDS', kind, records: [rec], partial, adopted: !partial })
+    return res
+  }, [])
+
+  // An owner's PATCH answers `{ owner }`, the whole record with its history.
+  const adoptOwner = useCallback((res) => {
+    const rec = res?.owner
+    if (rec?.id && res?.success !== false) dispatch({ type: 'CACHE_RECORDS', kind: 'owner', records: [rec], adopted: true })
     return res
   }, [])
 
   // Each listing's photo saves, chained so they reach the server in order.
   const mediaQueue = useRef({})
-  const optimistic = useCallback((what, apply, revert, call, okMsg) => {
+  const optimistic = useCallback((what, apply, revert, call, okMsg, kind) => {
     apply()
     if (okMsg) toast(okMsg)
     return call()
       .then(res => {
         if (rejected(res)) throw new Error(res.error || 'rejected')
-        settled()
+        settled(kind)
         return res
       })
-      .catch(err => { revert(); failed(err, what); settled(); return null })
+      .catch(err => { revert(); failed(err, what); settled(kind); return null })
   }, [failed, toast, settled])
 
   const api = {
@@ -1323,6 +1359,9 @@ export function StoreProvider({ children }) {
     // request in the overwhelmingly common case. A miss is a normal outcome,
     // not an error: useRecord() fetches that one record by id.
     lookup: (kind, id) => (id && state.cache?.[kind]?.[id]) || null,
+    // A refetch token that ignores writes to the kinds named: a read that no
+    // lead write can change keys on asOf('lead') instead of dataAsOf.
+    asOf: (...ignore) => ['all', ...WRITE_KINDS.filter(k => !ignore.includes(k))].map(k => state.asOf?.[k] || 0).join('.'),
     // A write made outside the store's own methods (the conversion forms in
     // components/Agreements.jsx) announces itself the same way, so every open
     // screen refetches instead of showing the record as it was.
@@ -1334,12 +1373,12 @@ export function StoreProvider({ children }) {
       return write('Assign',
         () => apiClient.updateLead(leadId, { agentId }).then(adopt('lead')),
         () => dispatch({ type: 'ASSIGN', leadId, agentId }),
-        'Lead assigned to ' + (a ? a.first : ''))
+        'Lead assigned to ' + (a ? a.first : ''), 'lead')
     },
     updateLead: (leadId, patch) => write('Update lead',
       () => apiClient.updateLead(leadId, patch).then(adopt('lead')),
       () => dispatch({ type: 'UPDATE_LEAD', leadId, patch }),
-      'Lead details updated'),
+      'Lead details updated', 'lead'),
     // A LISTING'S PHOTOS, saved as they are changed. Optimistic: reordering and
     // removing are taps on tiles, and a tile that waits on the server before it
     // moves reads as a frozen screen. A refused write puts the list back as it
@@ -1381,8 +1420,10 @@ export function StoreProvider({ children }) {
         // No note. This sent the literal "Stage updated via CRM view" to satisfy
         // a mandatory-note rule, and it was then printed on every stage row in
         // every lead's history — a sentence that says only "this app did it".
-        () => apiClient.changeStage(leadId, stage),
-        'Stage → ' + stage)
+        // The reply carries the record (an API older than this build does not,
+        // and then the record is read again as before).
+        () => apiClient.changeStage(leadId, stage).then(adopt('lead')),
+        'Stage → ' + stage, 'lead')
     },
     // Optimistic for the same reason: this is a tick on a row the agent is
     // working through, and the tick has to land under the finger.
@@ -1396,22 +1437,28 @@ export function StoreProvider({ children }) {
     // server. While the browser wrote that line itself the row was there
     // instantly and the slow refetch behind it went unnoticed — so this is the
     // same write costing a round trip it had already paid for.
-    setFollowUp: (leadId, followUp) => {
+    setFollowUp: (leadId, followUp, okMsg) => {
       const prev = api.lookup('lead', leadId)?.followUp ?? null
       return optimistic('Follow-up',
         () => dispatch({ type: 'FOLLOWUP', leadId, followUp }),
         () => dispatch({ type: 'FOLLOWUP', leadId, followUp: prev }),
         () => apiClient.updateLead(leadId, { followUp }).then(adopt('lead')),
-        'Follow-up set and added to the calendar')
+        okMsg || 'Follow-up set and added to the calendar', 'lead')
     },
     // The status and its booked call in ONE write: the server refuses a
     // Callback from a person with no call booked, so the two cannot be sent
     // one after the other.
-    setCallback: (leadId, followUp) => write('Callback',
-      () => apiClient.updateLead(leadId, { stage: CALLBACK_STATUS, followUp }).then(adopt('lead')),
-      // The reply is the record (adopt); nothing to patch on top of it.
-      null,
-      'Callback booked'),
+    // Optimistic like setFollowUp: the picker closes on Save and the row shows
+    // the callback at once; a refusal puts both back. The reply is the record.
+    setCallback: (leadId, followUp) => {
+      const l = api.lookup('lead', leadId)
+      const prevStage = l?.stage, prevFu = l?.followUp ?? null
+      return optimistic('Callback',
+        () => { dispatch({ type: 'STAGE', leadId, stage: CALLBACK_STATUS }); dispatch({ type: 'FOLLOWUP', leadId, followUp }) },
+        () => { if (prevStage) dispatch({ type: 'STAGE', leadId, stage: prevStage }); dispatch({ type: 'FOLLOWUP', leadId, followUp: prevFu }) },
+        () => apiClient.updateLead(leadId, { stage: CALLBACK_STATUS, followUp }).then(adopt('lead')),
+        'Callback booked', 'lead')
+    },
     // `logEvent` used to dispatch a timeline entry into local React state and
     // toast "Call logged" — with no request behind it. The entry was gone on
     // the next reload and no teammate ever saw it. It goes through the same
@@ -1426,13 +1473,23 @@ export function StoreProvider({ children }) {
     // Remark thread (B1) — real persistence, not the old client-only note echo.
     // kind = 'lead' | 'property' | 'owner'.
     // Resolves true once saved, so a caller can keep its text on a refusal.
+    // OPTIMISTIC: the remark is on the record the moment it is sent, and the
+    // server's event replaces it when it lands (or it comes off, with a toast).
+    // One held by the outbox while offline stays, as the outbox says.
     addRemark: (kind, id, text) => {
+      const tempId = 'tmp_' + Date.now().toString(36)
+      dispatch({ type: 'ADD_TIMELINE_EVENT', kind, id, event: {
+        id: tempId, type: 'remark', label: text, authorId: state.activeAgentId || null,
+        timestamp: new Date().toISOString(), metadata: {},
+      } })
+      const drop = (msg) => { dispatch({ type: 'DROP_TIMELINE_EVENT', kind, id, eventId: tempId }); toast(msg, 'warn'); return false }
       return apiClient.addRemark(id, text)
         .then(res => {
-          if (res?.success && res.timeline_event) { dispatch({ type: 'ADD_TIMELINE_EVENT', kind, id, event: res.timeline_event }); toast('Remark added'); return true }
-          toast('Could not save the remark', 'warn'); return false
+          if (res?.queued) return true
+          if (res?.success && res.timeline_event) { dispatch({ type: 'EDIT_TIMELINE_EVENT', kind, id, eventId: tempId, event: res.timeline_event }); toast('Remark added'); return true }
+          return drop('Could not save the remark')
         })
-        .catch(err => { console.warn('[Remark API] error:', err.message); toast('Could not save the remark. Try again.', 'warn'); return false })
+        .catch(err => { console.warn('[Remark API] error:', err.message); return drop('Could not save the remark. Try again.') })
     },
     // THE SERVER'S EVENT, WHOLE. This rebuilt the row from the two values it
     // had sent — so a locked row (a booking) took the agent's note as its
@@ -1603,14 +1660,38 @@ export function StoreProvider({ children }) {
         dispatch({ type: 'ADD_OWNER', owner: created?.id ? created : owner })
       },
       null),
-    setOwnerStage: (id, stage) => write('Status change',
-      () => apiClient.updateOwner(id, { stage }),
-      () => dispatch({ type: 'SET_OWNER_STAGE', id, stage }),
-      'Status → ' + stage),
+    // OPTIMISTIC, as a lead's status is: the row moved only when the server
+    // answered (~1.5s on a phone), and then the record could still show the
+    // copy read before it. The reply is the whole owner, kept as the record.
+    setOwnerStage: (id, stage) => {
+      const prev = api.lookup('owner', id)?.stage
+      return optimistic('Status change',
+        () => dispatch({ type: 'SET_OWNER_STAGE', id, stage }),
+        () => { if (prev !== undefined) dispatch({ type: 'SET_OWNER_STAGE', id, stage: prev }) },
+        () => apiClient.updateOwner(id, { stage }).then(adoptOwner),
+        'Status → ' + stage, 'owner')
+    },
     updateOwner: (id, patch) => write('Update owner',
-      () => apiClient.updateOwner(id, patch),
+      () => apiClient.updateOwner(id, patch).then(adoptOwner),
       () => dispatch({ type: 'UPDATE_OWNER', id, patch }),
-      'Owner details updated'),
+      'Owner details updated', 'owner'),
+    // CLOSING ONE, with its reason as a remark, in ONE request: it was the
+    // update and then a remark, one after the other. Optimistic like the
+    // status. An API older than this build does not take `remark`, and then
+    // the remark is sent on its own as before.
+    rejectOwner: (id, patch, remark) => {
+      const prev = api.lookup('owner', id)
+      const before = prev ? { stage: prev.stage, rejectionReason: prev.rejectionReason ?? null, callbackAt: prev.callbackAt ?? null, callbackNote: prev.callbackNote ?? null } : null
+      return optimistic('Close owner',
+        () => dispatch({ type: 'UPDATE_OWNER', id, patch }),
+        () => { if (before) dispatch({ type: 'UPDATE_OWNER', id, patch: before }) },
+        () => apiClient.updateOwner(id, { ...patch, remark }).then(adoptOwner).then(res => {
+          const said = (res?.owner?.timeline || []).some(e => e.type === 'remark' && String(e.label || '').includes(remark))
+          if (res?.success && !said) return apiClient.addRemark(id, remark).then(() => res).catch(() => res)
+          return res
+        }),
+        'Status → ' + patch.stage, 'owner')
+    },
     // A callback is one moment, so it travels as one ISO timestamp — not the
     // lead follow-up's {date,time,action}, where 'Today' is a display string
     // the server has to guess a date from. It leaves the status alone: Callback
@@ -1621,10 +1702,15 @@ export function StoreProvider({ children }) {
       const patch = at
         ? { callbackAt: at, callbackNote: note || null }
         : { callbackAt: null, callbackNote: null }
-      return write('Schedule callback',
-        () => apiClient.updateOwner(id, patch),
+      // Optimistic: Done on the card and Save in the picker change the row at
+      // once, and put it back if the server refuses.
+      const o = api.lookup('owner', id)
+      const before = { callbackAt: o?.callbackAt ?? null, callbackNote: o?.callbackNote ?? null }
+      return optimistic('Schedule callback',
         () => dispatch({ type: 'UPDATE_OWNER', id, patch }),
-        at ? 'Callback scheduled' : 'Callback cleared')
+        () => dispatch({ type: 'UPDATE_OWNER', id, patch: before }),
+        () => apiClient.updateOwner(id, patch).then(adoptOwner),
+        at ? 'Callback scheduled' : 'Callback cleared', 'owner')
     },
     deleteOwner: (ids) => api.deleteMany('owner', ids),
     // A partial delete is the outcome that has to be reported honestly: five of
@@ -1787,8 +1873,8 @@ export function StoreProvider({ children }) {
       // Re-fetch under the just-authenticated tenant so the desk shows THIS
       // firm's data (empty for a new tenant), not whatever loaded for the
       // default tenant before login.
+      // The bell's count comes with it; the drawer's rows when it opens.
       loadServerState()
-      setTimeout(loadNotifications, 0)
     },
     /**
      * Enter a workspace this browser is already signed into, without a reload.
@@ -1799,7 +1885,6 @@ export function StoreProvider({ children }) {
       if (!s.loggedIn) return false
       dispatch({ type: 'RESTORE_SESSION', session: s })
       loadServerState()
-      setTimeout(loadNotifications, 0)
       return true
     },
     logout: () => {
