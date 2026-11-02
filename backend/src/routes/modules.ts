@@ -9,13 +9,12 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { requireTenantAuth } from '../middleware/auth';
 import { getSettings } from '../services/store';
 
 export const modulesRouter = Router();
 
-// Ensure mandatory tenant authentication
-modulesRouter.use(requireTenantAuth);
+// Signed in only: index.ts puts requireTenantAuth in front of everything
+// under /api/v1/modules, once, for this router and the records router both.
 
 /**
  * 1. FETCH FULL MODULE CONFIGURATION (Stages + Custom Fields)
@@ -23,10 +22,6 @@ modulesRouter.use(requireTenantAuth);
  */
 modulesRouter.get('/:moduleKey/config', async (req: Request, res: Response) => {
   const { moduleKey } = req.params;
-  const tenant = req.tenant!;
-
-  console.log(`[Fetch Module Config] Tenant: ${tenant.name} | Module: ${moduleKey}`);
-
   try {
     const settings = await getSettings();
     const stages = settings.stages || [

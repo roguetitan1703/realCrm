@@ -10,7 +10,6 @@
 
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import { requireTenantAuth } from '../middleware/auth';
 import { notWorkableBody } from '../services/workforce';
 import { phoneInvalidBody } from '../services/phone';
 import { bookingRefusedBody } from '../services/followUp';
@@ -23,7 +22,8 @@ import { canEditListing, canAddListing, canDeleteRecord } from '../lib/permissio
 
 export const recordsRouter = Router({ mergeParams: true });
 
-recordsRouter.use(requireTenantAuth);
+// Signed in only: index.ts runs requireTenantAuth for all of /api/v1/modules
+// before this router (see there). Mount it nowhere else without it.
 
 function actorCtx(req: Request) {
   return {

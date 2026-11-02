@@ -247,16 +247,30 @@ export async function createSession(tenantId: string | null, userId: string, ctx
 }
 
 /** Load a live session and slide its window. Returns the row or null if it's
- *  missing / revoked / expired. The last_seen bump is throttled to ~5 min. */
+ *  missing / revoked / expired. The last_seen bump is throttled to ~5 min.
+ *
+ *  ONE ROUND TRIP. This runs in front of every signed-in request, and it was a
+ *  SELECT followed by an UPDATE whose WHERE threw the write away on almost every
+ *  request — the write was throttled, the trip to the database was not. The slide
+ *  is now a data-modifying CTE in the same statement: `live` is exactly the old
+ *  SELECT (so revoke, sign-out and expiry still refuse on the very next
+ *  request — nothing about "alive" is remembered between requests), and
+ *  `slide` is exactly the old UPDATE, run only when `live` found the row. Both
+ *  see one snapshot, so the row returned is the one before the slide, as it
+ *  was. A support session (support_by) still never slides its expiry. */
 export async function touchSession(jti: string): Promise<any | null> {
-  const rows = await sql`SELECT * FROM sessions WHERE id = ${jti} AND revoked = FALSE AND expires_at > NOW() LIMIT 1`;
-  if (!rows.length) return null;
-  await sql`
-    UPDATE sessions SET last_seen_at = NOW(),
-           expires_at = CASE WHEN support_by IS NULL THEN ${sessionExpiryISO()}::timestamptz ELSE expires_at END
-    WHERE id = ${jti} AND last_seen_at < NOW() - INTERVAL '5 minutes'
+  const rows = await sql`
+    WITH live AS (
+      SELECT * FROM sessions WHERE id = ${jti} AND revoked = FALSE AND expires_at > NOW() LIMIT 1
+    ), slide AS (
+      UPDATE sessions s SET last_seen_at = NOW(),
+             expires_at = CASE WHEN s.support_by IS NULL THEN ${sessionExpiryISO()}::timestamptz ELSE s.expires_at END
+      FROM live
+      WHERE s.id = live.id AND s.last_seen_at < NOW() - INTERVAL '5 minutes'
+    )
+    SELECT * FROM live
   `;
-  return rows[0];
+  return rows[0] || null;
 }
 
 export async function revokeSession(jti: string): Promise<void> {
