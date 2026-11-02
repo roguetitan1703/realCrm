@@ -3637,11 +3637,59 @@ async function describeMove(m: Move, ctx: ActorCtx): Promise<void> {
   if (agentId) await notifyHandedOver(m.kind, agentId, m.before);
 }
 
-/** Several moves, all or nothing; then what is said about each. */
+/**
+ * Several moves, all or nothing; then what is said about each.
+ *
+ * ONE PASS FOR THE WHOLE PLAN, not moveRecords() once per person: the holder
+ * check for everyone, then per side one statement that reads who held each
+ * record and moves it, then every assignment line in one insert. Per person it
+ * was five round trips in a row inside the transaction — a hand-out to seven
+ * people held a pooled connection for ~35 of them. Same rule as moveRecords:
+ * only records that actually change hands move and get a line, with who held
+ * them before; a "bulk assignment" reason only on a move of more than one.
+ */
 async function moveAll(plan: { kind: 'lead' | 'owner'; ids: string[]; agentId: string }[], ctx: ActorCtx): Promise<Move[]> {
+  const steps = plan
+    .map(p => ({ ...p, ids: [...new Set((p.ids || []).filter(Boolean))] }))
+    .filter(p => p.ids.length);
+  if (!steps.length) return [];
+  const t = tid();
   const moves: Move[] = await sql.begin(async (tx: any) => {
-    const out: Move[] = [];
-    for (const p of plan) if (p.ids.length) out.push(await moveRecords(tx, p.kind, p.ids, p.agentId, ctx));
+    await assertWorkable(t, steps.map(p => p.agentId), tx);
+    const before = new Map<string, { id: string; agent_id: string | null }[]>();
+    for (const kind of ['lead', 'owner'] as const) {
+      const mine = steps.filter(p => p.kind === kind);
+      if (!mine.length) continue;
+      const table = kind === 'lead' ? sql`crm_leads` : sql`crm_owners`;
+      const ids = mine.flatMap(p => p.ids);
+      const to = mine.flatMap(p => p.ids.map(() => p.agentId));
+      // `was` reads the rows as they stood when the statement began, so it is
+      // the holder before the move (both parts see one snapshot).
+      const rows = await tx`
+        WITH plan AS (SELECT * FROM unnest(${ids}::text[], ${to}::text[]) AS p(id, agent)),
+        was AS (
+          SELECT c.id, c.agent_id, plan.agent FROM ${table} c JOIN plan ON plan.id = c.id
+           WHERE c.tenant_id = ${t} AND coalesce(c.agent_id, '') IS DISTINCT FROM coalesce(plan.agent, '')
+        ),
+        moved AS (
+          UPDATE ${table} c SET agent_id = was.agent, updated_at = NOW()
+            FROM was WHERE c.id = was.id AND c.tenant_id = ${t}
+          RETURNING c.id
+        )
+        SELECT was.id, was.agent_id, was.agent FROM was JOIN moved USING (id)`;
+      for (const r of rows as any[]) {
+        const key = `${kind}:${r.agent}`;
+        before.set(key, [...(before.get(key) || []), { id: r.id, agent_id: r.agent_id }]);
+      }
+    }
+    const out: Move[] = steps.map(p => {
+      const was = before.get(`${p.kind}:${p.agentId}`) || [];
+      return { kind: p.kind, ids: p.ids, agentId: p.agentId, n: was.length, before: was };
+    });
+    await recordAssignments(out.flatMap(m => m.before.map(row => ({
+      recordId: row.id, prevAgentId: row.agent_id, agentId: m.agentId,
+      reason: m.ids.length > 1 ? 'bulk assignment' : undefined, author: ctx.actorId ?? null,
+    }))), tx);
     return out;
   }) as any;
   // After the reply, one move after another: a hand-out to seven people is
@@ -6164,25 +6212,32 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
   const refreshed = await sql`SELECT * FROM crm_properties WHERE id = ${id} AND tenant_id = ${tid()}`;
   const updated = rowToProperty(refreshed[0] || rows[0]);
   // WHAT CHANGED, in its history (7.3). Only what a person would ask about
-  // later: the status, the price, the owner, the photos.
+  // later: the status, the price, the owner, the photos. Collected and written
+  // in one insert — each was its own awaited round trip — and best-effort, as
+  // propertyEvent always was.
+  const author = ctx.actorId ?? getContext()?.userId ?? 'System';
+  const lines: Omit<TimelineEvent, 'id' | 'timestamp'>[] = [];
+  const line = (type: string, title: string, description: string, metadata: any = {}) =>
+    lines.push({ record_id: id, type, title, description, author, metadata });
   const was = before.status || 'Available', now = updated.status || 'Available';
-  if (was !== now) await propertyEvent(id, ctx, 'stage_change', `${was} → ${now}`, `${was} → ${now}`, { from: was, to: now });
+  if (was !== now) line('stage_change', `${was} → ${now}`, `${was} → ${now}`, { from: was, to: now });
   if (String(before.price ?? '') !== String(updated.price ?? '') && (before.price || updated.price)) {
     const loc = await localeOf(tid());
-    await propertyEvent(id, ctx, 'price', 'Price', `${priceText(before.price, loc)} → ${priceText(updated.price, loc)}`);
+    line('price', 'Price', `${priceText(before.price, loc)} → ${priceText(updated.price, loc)}`);
   }
   if ((before.owner || '') !== (updated.owner || '') || (before.ownerPhone || '') !== (updated.ownerPhone || '')) {
-    await propertyEvent(id, ctx, 'owner', 'Owner', updated.owner || updated.ownerPhone ? `Now ${updated.owner || updated.ownerPhone}` : 'Removed');
+    line('owner', 'Owner', updated.owner || updated.ownerPhone ? `Now ${updated.owner || updated.ownerPhone}` : 'Removed');
   }
   const had = (before.media || []).length, has = (updated.media || []).length;
   if (had !== has) {
     const n = Math.abs(has - had);
-    await propertyEvent(id, ctx, 'media', 'Photos', `${n} ${n === 1 ? 'photo or video' : 'photos or videos'} ${has > had ? 'added' : 'removed'}`);
+    line('media', 'Photos', `${n} ${n === 1 ? 'photo or video' : 'photos or videos'} ${has > had ? 'added' : 'removed'}`);
   } else if (has && (before.media?.[0]?.key || null) !== (updated.media?.[0]?.key || null)) {
     // The cover is what a shared listing leads with, so a new one is history;
     // the order of the rest is not.
-    await propertyEvent(id, ctx, 'media', 'Photos', 'New cover photo');
+    line('media', 'Photos', 'New cover photo');
   }
+  if (lines.length) await addTimelineEvents(lines).catch(err => console.warn('[Property history] could not write:', err?.message));
   audit({
     tenant_id: tid(), actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
     actor_label: ctx.actorLabel ?? null, action: 'property.update', target_type: 'property', target_id: id,
