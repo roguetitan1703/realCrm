@@ -3,10 +3,11 @@
 ## Now
 Actions feel slow (Om 2 Nov). Merged on development: shortlist bursts (7 taps → 2 requests) and rename undo 2.9s → 1.2s (b-speed), a sold/rented flat on a lead shows its status and cannot be ticked (71d4f4b); auth check 2–4 → 1 round trip per request (a-auth-speed, reviewed; review's fail-open finding fixed in 40b1a15); shell requests once per screen (desk Calling 11 → 7 at once, phone screens 8–10 → 4), a write refreshes only what it changed (status change 6 → 2 requests after the tap), owner status/callback/close show in ~40ms instead of 2.3–2.7s, close is one request, the repeated "Stage → Contacted" line stopped (b-speed2); assign 1.6–2.2s → 0.03s, Today Done 2.1s → 0.05s, rota hand-out of 16 leads 9.4s → 2.4s (b-speed3, reviewed); smoke 41/41. All on development, not live: next release needs Om's go.
 Release 2 (c440165) is live on both halves; backup nightly on the EC2 (STATE.md).
+Messages (d39fb04, on development): WhatsApp to a lead names the agent and what they asked for; WhatsApp to an owner opens on an intro (new, editable in Settings); a property link lists the homes with price and is signed. bhumi gets the new lead message (none saved); mahalaxmi keeps its own.
+Demo refresh (a-demo-refresh, builder A): dates of production demo firms demo-vadodara, urban, raipur move to today daily; hardcoded list, paying firms refused, 120-day cap. Reviewed: merge after fixes; A applying them.
 
 ## Next
-D1. Waits on Om: daily date refresh for production demo firms (urban, raipur, …) — today only the development db refreshes; it is a daily production write limited to demo firms (recommended yes, measure first, review)
-D2. Waits on Om: #153 intro wording (drafts given 2 Nov) and what is wrong with today's share message
+D1. Demo refresh: merge after A's review fixes, smoke, then it goes live with the next release (first run: vadodara ~30 days, urban 77, raipur 75)
 D3. Waits on Om: the delpat production login, for the signed-in live check
 S1. Speed, left of the 2 Nov audit: Record call = one endpoint — waits on the after-call sheet (UI review P1)
 0. UI review (docs/specs/ui-review.md, published for Om): waits on Om picking proposals; recommended P1 after-call sheet + P3 one word one number
@@ -14,7 +15,6 @@ S1. Speed, left of the 2 Nov audit: Record call = one endpoint — waits on the 
 2. Feed watch: owner alert merged (28a7fe9); production read 28 Oct: 0 alerts at bhumi/mahalaxmi, 2 at delpat. Delpat half (console view, a daily email to Om via sendMail) waits on Om
 2c. Local setup + dev data stays current: merged 28 Oct (`npm run setup:local`, `npm run dev:refresh`, README). Shared dev db needs `npm run dev:refresh -- --adopt=delpat` once; callback figures match their lists, merged (9514127)
 3. Desk mismatches: fixed and merged (d9d82df + this merge); naming of "Not yet contacted"/"Never called" and the Performance default wait on Om
-4. Work OS #153 WhatsApp intro templates, wording from Om
 6. Work OS #129 help desk (#156 demos feed it)
 
 ## Later
