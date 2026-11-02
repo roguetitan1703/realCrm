@@ -1281,6 +1281,11 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
    intent with a marker child and this reaches up to honour it. */
 .app-body:has(> .pw-page){display:flex;flex-direction:column;overflow:hidden}
 .pw-page{flex:1;min-height:0;display:flex}
+/* Settings renders its own .app-body inside the shell's. That inner one grew to
+   its content and never scrolled, yet as a scroll box it was what every sticky
+   in Settings stuck to — so the section nav and a save row scrolled away with
+   the page. The shell's box does the scrolling; the inner one stands aside. */
+.app-body.set-body{overflow:visible}
 
 /* ============================================================================
    MOBILE  (the CRM rendered for phone — agent role)
@@ -3048,6 +3053,13 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .rt-backlog-t{flex:1;font-size:13.5px;font-weight:600;color:var(--ink);display:flex;flex-direction:column;gap:2px}
 .rt-save{display:flex;align-items:center;gap:10px;margin:0 0 14px}
 .rt-save-n{font-size:12.5px;color:var(--muted);margin-right:auto}
+/* Settings → Outcomes */
+.oc-row{flex-wrap:wrap}
+.oc-row.oc-hidden .chip-in{color:var(--muted);text-decoration:line-through}
+.oc-reach{font-size:12px;color:var(--muted);min-width:96px}
+.oc-add{flex-wrap:wrap}
+.oc-add .oc-reach-pick{flex:0 0 auto;width:auto;min-width:130px}
+.oc-save{position:sticky;bottom:0;z-index:2;margin:0;padding:10px 0 4px;background:var(--card);border-top:1px solid var(--line-2)}
 .rt-rule-t{font-size:13.5px;font-weight:600}
 
 /* The description opt-in used to be a hand-rolled pill here: its own border,

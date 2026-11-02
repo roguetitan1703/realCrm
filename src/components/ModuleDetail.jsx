@@ -28,7 +28,8 @@
 import { stageLabel } from '../data/pipelineRoles.js'
 import { useState, useRef, useEffect } from 'react'
 import { ModuleRecordSheet } from './ModuleFields.jsx'
-import { Panel, SectionHead, Button, Stepper, StageTag, TYPE_TAG, outcomeLabel } from './primitives.jsx'
+import { Panel, SectionHead, Button, Stepper, StageTag, TYPE_TAG } from './primitives.jsx'
+import { outcomeLabel, outcomeChannelOf } from '../data/callOutcomes.js'
 import { DetailLayout } from '../layouts/layouts.jsx'
 import { ActionRail, RailSection } from './rail.jsx'
 import { SelectDropdown } from './collections.jsx'
@@ -117,7 +118,7 @@ function LatestRemark({ record, store }) {
 
   if (!latest) return null
   const who = latest.authorName || (latest.authorId ? agentName(store.state.agents, latest.authorId) : null)
-  const outcome = outcomeLabel(latest.metadata?.outcome)
+  const outcome = outcomeLabel(latest.metadata?.outcome, outcomeChannelOf(latest.type, latest.label))
 
   // Two rows: what it is and when, then the note. No leading icon — a note
   // glyph beside text reads as an edit button, and this one does nothing. The

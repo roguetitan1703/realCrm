@@ -5,7 +5,7 @@ import Icon from './Icon.jsx'
 import { theme, stageClassFor } from '../data/theme.js'
 import { whenLabel, agentName, repeatMark, dmy, ymdFromDmy, capitaliseWords } from '../lib/format.js'
 import { fileUrl, formatDistance } from '../lib/media.js'
-import { CALL_OUTCOMES, WA_OUTCOMES, VISIT_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
+import { outcomeList, outcomeLabel, outcomeChannelOf } from '../data/callOutcomes.js'
 import { stageLabel } from '../data/pipelineRoles.js'
 
 // ---- Button ----
@@ -558,47 +558,19 @@ const LOCKED_TEXT_TYPES = new Set(['followup'])
 // Exported: the record header shows the latest of these at the top, and a
 // second copy of this map would be two vocabularies drifting apart.
 export const TYPE_TAG = { remark: 'Remark', call: 'Call', wa: 'WhatsApp', sms: 'SMS', visit: 'Site visit', followup: 'Follow-up', share: 'Shared link' }
-// B4 outcomes are stored as stable keys; these are what a person reads. Derived
-// from the one list rather than typed a second time — the map and the list used
-// to be separate literals that agreed only by luck.
-export const VISIT_OUTCOME_LABEL = Object.fromEntries(VISIT_OUTCOMES.map(o => [o.value, o.label]))
 /**
- * The outcomes this entry can be given, by what kind of entry it is.
+ * The outcomes this entry can be given, and what a stored one reads as: the
+ * firm's lists (src/data/callOutcomes.js, Settings → Outcomes), by what kind of
+ * entry it is (outcomeChannelOf). There was once a second call list hard-coded
+ * here that disagreed with the real one on every option, so the dropdown an
+ * agent saw depended on which control they reached it through. One catalogue.
  *
- * There was a SECOND call-outcome list hard-coded here — five strings that
- * disagreed with the seven in src/data/callOutcomes.js on every single one:
- * "No Answer / Ringing" against "No answer", "Requested Callback Later"
- * against "Asked to call back", "Number Busy / Switched Off" against "Busy or
- * switched off", and no "Wrong number" or "Not interested" at all.
- *
- * So the dropdown an agent saw depended on which control they reached it
- * through — the confirm modal after a call offered one vocabulary, editing that
- * same entry on the timeline five minutes later offered another. Both wrote to
- * `metadata.outcome`, which stores the label, so one desk has been filling one
- * column with two vocabularies. Any report grouping by outcome splits every
- * category in half.
- *
- * One list, imported, and WhatsApp gets its own — a message does not end the
- * way a call does.
+ * A booked follow-up that is a call is answered from the CALL list: it offered
+ * "No show" and "Negotiating" against a phone call. A stored outcome the firm
+ * has since hidden stays offered on its own row, so saving a note does not
+ * silently drop it; a row written before keys holds a display string, shown as
+ * written.
  */
-// `followup` is a booked demo/meeting/callback being told how it went. It is
-// the reason this row is editable at all — see LOCKED_TEXT_TYPES server-side,
-// which keeps its sentence while letting the outcome and a note attach to it.
-const OUTCOMES_FOR = { call: CALL_OUTCOMES, wa: WA_OUTCOMES, sms: WA_OUTCOMES, followup: VISIT_OUTCOMES }
-
-/**
- * A stored outcome, as a person reads it — from any of the three vocabularies,
- * and tolerant of what is already in the database.
- *
- * Contact outcomes are stored as stable keys (`no_answer`) and resolved here;
- * visit outcomes have always been keys (`interested`); and rows written before
- * the switch hold a display string ("No answer") which is returned unchanged.
- * That last fallback is what lets the label be renamed without the history
- * going blank — an old row keeps saying what it said when it was written.
- */
-export const outcomeLabel = (raw) =>
-  (raw ? (labelForOutcome(raw) || VISIT_OUTCOME_LABEL[raw] || raw) : '')
-
 /**
  * The proof attached to a site visit (B4): the selfie, the GPS fix, and — when
  * the property has coordinates on file — how far the photo was taken from it.
@@ -731,7 +703,8 @@ function TimelineRow({ e, isLast, agents, currentUserId, onEditRemark, fmtLabel,
   // The stamped name wins: a seat that has changed hands must not re-label
   // the previous holder's work as the new person's (see author_name).
   const author = e.authorName || (e.authorId ? agentName(agents, e.authorId) : null)
-  const outcomeText = outcomeLabel(e.metadata?.outcome)
+  const channel = outcomeChannelOf(e.type, e.label)
+  const outcomeText = outcomeLabel(e.metadata?.outcome, channel)
   const save = () => {
     const body = locked ? note : text
     if (!body.trim() && !outcome) return
@@ -749,7 +722,7 @@ function TimelineRow({ e, isLast, agents, currentUserId, onEditRemark, fmtLabel,
         {editing ? (
           <OutcomeForm
             line={locked ? fmtLabel(e.label) : null}
-            outcomes={OUTCOMES_FOR[e.type]}
+            outcomes={channel ? outcomeList(channel, e.metadata?.outcome) : null}
             outcome={outcome} onOutcome={v => edit({ outcome: v })}
             text={locked ? note : text}
             onText={v => edit(locked ? { note: v } : { text: v })}

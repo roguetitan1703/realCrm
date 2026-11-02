@@ -4,6 +4,7 @@
 // mutated via Express backend endpoints. Transient UI is managed in React state.
 // ============================================================================
 import { setStageLabels } from '../data/pipelineRoles.js'
+import { setFirmOutcomes } from '../data/callOutcomes.js'
 import { setFirmLocale } from './locale.js'
 import { createContext, useContext, useReducer, useCallback, useRef, useEffect } from 'react'
 import { DEFAULT_SETTINGS, DEFAULT_BRAND, PROTECTED_STAGES, leadIntroTemplate } from '../data/theme.js'
@@ -833,6 +834,9 @@ export function StoreProvider({ children }) {
   // render rather than in an effect: every tag drawn in this same render must
   // already say "Booked", not flash "Deal Closed" first.
   setStageLabels(state.settings?.stageLabels)
+  // The firm's outcome lists (callOutcomes.js), the same way: every picker and
+  // history line drawn in this render reads the firm's words.
+  setFirmOutcomes(state.settings?.outcomes)
   // The firm's money, phone and bedroom words (lib/locale.js), the same way and
   // for the same reason: India until the settings say otherwise.
   setFirmLocale(state.settings?.locale)
@@ -1886,6 +1890,12 @@ export function StoreProvider({ children }) {
       // answer rather than guessing, so the Final tag lands on the new name.
       (res) => dispatch({ type: 'PATCH_SETTINGS', patch: { ownerStages: next, ...(res?.settings?.finalStages ? { finalStages: res.settings.finalStages } : {}) } }),
       note),
+    // One channel's outcome list (Settings → Outcomes). The server's answer is
+    // adopted, not the list sent: it mints the keys of outcomes just added.
+    setOutcomes: (channel, list) => write('Outcomes',
+      () => apiClient.updateSettings({ outcomes: { [channel]: list } }),
+      (res) => dispatch({ type: 'PATCH_SETTINGS', patch: { outcomes: res?.settings?.outcomes } }),
+      'Saved'),
     // Generic settings patch — persists any key (slaHours, reminderDays, currency, …).
     patchSettings: (patch, note) => write('Settings',
       () => apiClient.updateSettings(patch),

@@ -23,6 +23,7 @@ import { firstRunAlertLifecycle } from './alertLifecycle.js';
 import { suggestPassword } from './auth.js';
 import { followUpKind, BookingRefused } from './followUp.js';
 import { followUpKindOf, bookedAt } from '../../../src/data/followUpKinds.js';
+import { BUILTIN_OUTCOMES, OUTCOME_CHANNELS, REACH_CHOICES, ADDED_PREFIX, outcomeListIn } from '../../../src/data/callOutcomes.js';
 import { CALLBACK_STATUS } from '../../../src/data/leadStatus.js';
 import { galleryPath } from './gallery.js';
 import { planRoster, rosterPhone, RosterRow } from './roster.js';
@@ -3045,7 +3046,7 @@ const arrivalStageCache = new Map<string, { v: DeskConfig; at: number }>();
 const ARRIVAL_TTL_MS = 60_000;
 
 /** The settings every worklist question is asked against. */
-export type DeskConfig = { arrivalStage: string; slaHours: number; timezone: string; coldDays: number; workStart: number; workEnd: number; locale: Locale };
+export type DeskConfig = { arrivalStage: string; slaHours: number; timezone: string; coldDays: number; workStart: number; workEnd: number; locale: Locale; outcomes: any };
 
 /**
  * THE FIRM'S WORKING HOURS, whole hours on its own clock (Settings → Response
@@ -3116,6 +3117,9 @@ export async function deskConfigOf(tenantId: string): Promise<DeskConfig> {
     // Currency, phone country and bedroom words (src/lib/locale.js). India,
     // field by field, for a firm that never set them.
     locale: resolveLocale(cfg.locale),
+    // The firm's outcome lists as stored (src/data/callOutcomes.js reads them;
+    // absent is the built-ins). Settings → Outcomes drops this cache on save.
+    outcomes: cfg.outcomes && typeof cfg.outcomes === 'object' ? cfg.outcomes : undefined,
   };
   arrivalStageCache.set(tenantId, { v, at: Date.now() });
   return v;
@@ -6940,6 +6944,81 @@ async function cleanSharingPatch(patch: any, current: any, ctx: ActorCtx | null)
   return next;
 }
 
+/**
+ * SETTINGS → OUTCOMES: one or more channels' whole lists, checked against what
+ * is stored (src/data/callOutcomes.js says what the lists are). Returns the
+ * `outcomes` value to store — the channels not sent are kept as they were.
+ *
+ *   • every outcome the firm has had stays: built-ins (history points at their
+ *     keys) and the firm's own (so a key is never reused). Hidden is removal.
+ *   • a built-in keeps its reach; only a label that differs from the built-in
+ *     one is stored, so untouched rows say nothing and a better default wording
+ *     still reaches the firm.
+ *   • an outcome sent without a key is new: it needs a name and, on a call or
+ *     a WhatsApp, a reach from REACH_CHOICES, and is given a key here.
+ *   • a key the firm has not got is refused, as is a name on the list twice
+ *     and a list with nothing left showing.
+ */
+function cleanOutcomesPatch(patch: any, current: any): any {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('Outcomes not understood.');
+  const stored = current && typeof current === 'object' ? current : {};
+  const next: Record<string, any[]> = { ...stored };
+  const taken = new Set(OUTCOME_CHANNELS.flatMap((c: string) => outcomeListIn({ outcomes: stored }, c).map((x: any) => x.value)));
+  for (const ch of Object.keys(patch)) {
+    if (!OUTCOME_CHANNELS.includes(ch)) throw new Error(`There is no outcome list called "${ch}".`);
+    const sent = patch[ch];
+    if (!Array.isArray(sent) || sent.length > 60) throw new Error('Outcomes not understood.');
+    const have: any[] = outcomeListIn({ outcomes: stored }, ch);
+    const reaches: string[] | undefined = (REACH_CHOICES as any)[ch];
+    const out: any[] = [];
+    const seen = new Set<string>();
+    const names = new Set<string>();
+    for (const it of sent) {
+      const label = String(it?.label ?? '').trim();
+      if (label.length > 60) throw new Error(`"${label.slice(0, 20)}…" is too long. Keep a name under 60 letters.`);
+      let value = typeof it?.value === 'string' ? it.value : '';
+      const known = value ? have.find(x => x.value === value) : null;
+      if (value && !known) throw new Error(`Unknown outcome "${value}".`);
+      let reach: string | undefined = known?.reach;
+      if (!value) {
+        if (!label) throw new Error('A new outcome needs a name.');
+        if (reaches) {
+          if (!reaches.includes(it?.reach)) throw new Error(`Say what "${label}" means: picked up or not.`);
+          reach = it.reach;
+        }
+        const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 24) || 'x';
+        let n = 1;
+        while (taken.has(`${(ADDED_PREFIX as any)[ch]}${slug}_${n}`)) n++;
+        value = `${(ADDED_PREFIX as any)[ch]}${slug}_${n}`;
+        taken.add(value);
+      }
+      if (seen.has(value)) throw new Error('An outcome is on the list twice.');
+      seen.add(value);
+      const builtin = (BUILTIN_OUTCOMES as any)[ch].find((b: any) => b.value === value);
+      const shown = label || known?.label || builtin?.label;
+      if (names.has(shown.toLowerCase())) throw new Error(`"${shown}" is on the list twice.`);
+      names.add(shown.toLowerCase());
+      const item: any = { value };
+      if (builtin) { if (label && label !== builtin.label) item.label = label; }
+      else { item.label = shown; if (reach) item.reach = reach; }
+      if (it?.hidden === true) item.hidden = true;
+      out.push(item);
+    }
+    for (const x of have) if (!seen.has(x.value)) throw new Error(`"${x.label}" cannot be removed. Hide it instead.`);
+    if (!out.some(x => !x.hidden)) throw new Error('Keep at least one outcome showing.');
+    next[ch] = out;
+  }
+  return next;
+}
+
+/**
+ * The firm's outcome lists, as the pure functions in src/data/callOutcomes.js
+ * take them (`isOutcomeIn`, `outcomeKeysByReach`). Cached with the desk config.
+ */
+export async function outcomesOf(tenantId: string): Promise<{ outcomes: any }> {
+  return { outcomes: (await deskConfigOf(tenantId)).outcomes };
+}
+
 export async function updateSettings(patch: any): Promise<any> {
   // The "New today" pill keys off the first pipeline stage, and that answer is
   // cached. Renaming or reordering stages here has to drop it, or the pill
@@ -7005,6 +7084,9 @@ export async function updateSettings(patch: any): Promise<any> {
   if (patch.sharing !== undefined) {
     patch.sharing = await cleanSharingPatch(patch.sharing, before.sharing, null);
   }
+  if (patch.outcomes !== undefined) {
+    patch.outcomes = cleanOutcomesPatch(patch.outcomes, before.outcomes);
+  }
   if (patch.firmName) {
     await sql`UPDATE tenants SET name = ${patch.firmName}, pwa_config = NULL WHERE id = ${tid()} OR slug = ${tid()};`;
   }
@@ -7014,6 +7096,9 @@ export async function updateSettings(patch: any): Promise<any> {
     INSERT INTO crm_settings (key, value, tenant_id) VALUES ('default', ${sql.json(next)}, ${tid()})
     ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value;
   `;
+  // Again after the write: a read between the drop above and this save cached
+  // the old settings, and an outcome just added would be refused for a minute.
+  arrivalStageCache.delete(tid());
   // Sharing was just stopped: sweep again now it is saved. A link inserted
   // after cleanSharingPatch's sweep but before this save would otherwise
   // survive; one inserted after the save re-reads `stopped` and refuses itself.
@@ -7707,7 +7792,6 @@ export async function enquirySpanForLead(leadId: string): Promise<any | null> {
 // into a single feed at read time so the UI shows one timeline.
 
 export const ACTIVITY_TYPES = new Set(['call', 'site_visit', 'meeting', 'follow_up', 'note']);
-export const ACTIVITY_OUTCOMES = new Set(['interested', 'not_interested', 'negotiating', 'booked', 'no_show']);
 
 export interface ActivityInput {
   lead_id: string;
