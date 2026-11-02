@@ -794,20 +794,25 @@ function groupShortlistByLead(rows: any[]): Map<string, any[]> {
  */
 async function syncLeadShortlist(leadId: string, shortlist: string[], feedback: Record<string, any>, tenantId = DEFAULT_TENANT_ID): Promise<void> {
   const propertyIds = Array.from(new Set([...(shortlist || []), ...Object.keys(feedback || {})]));
-  for (const pid of propertyIds) {
-    const fb = (feedback || {})[pid] || {};
-    const id = `shl_${leadId}_${pid}`;
-    await sql`
+  const fb = (pid: string) => (feedback || {})[pid] || {};
+  const str = (v: any) => (v == null ? null : String(v));
+  // ONE STATEMENT, whatever the length of the list. This was an INSERT per
+  // property and then the DELETE, awaited in turn, so the seventh flat sent to
+  // a lead cost eight round trips. The upsert and the delete touch disjoint
+  // rows (in the list / not in it), so one snapshot serves both; an empty list
+  // inserts nothing and deletes every row, as the old else-branch did.
+  await sql`
+    WITH up AS (
       INSERT INTO lead_shortlist (id, tenant_id, lead_id, property_id, verdict, reason)
-      VALUES (${id}, ${tenantId}, ${leadId}, ${pid}, ${fb.verdict ?? null}, ${fb.reason ?? null})
-      ON CONFLICT (lead_id, property_id) DO UPDATE SET verdict = EXCLUDED.verdict, reason = EXCLUDED.reason;
-    `;
-  }
-  if (propertyIds.length > 0) {
-    await sql`DELETE FROM lead_shortlist WHERE lead_id = ${leadId} AND tenant_id = ${tenantId} AND property_id NOT IN ${sql(propertyIds)}`;
-  } else {
-    await sql`DELETE FROM lead_shortlist WHERE lead_id = ${leadId} AND tenant_id = ${tenantId}`;
-  }
+      SELECT v.id, ${tenantId}, ${leadId}, v.pid, v.verdict, v.reason
+        FROM unnest(${propertyIds.map(pid => `shl_${leadId}_${pid}`)}::text[], ${propertyIds}::text[],
+                    ${propertyIds.map(pid => str(fb(pid).verdict))}::text[], ${propertyIds.map(pid => str(fb(pid).reason))}::text[])
+             AS v(id, pid, verdict, reason)
+      ON CONFLICT (lead_id, property_id) DO UPDATE SET verdict = EXCLUDED.verdict, reason = EXCLUDED.reason
+      RETURNING 1
+    )
+    DELETE FROM lead_shortlist
+     WHERE lead_id = ${leadId} AND tenant_id = ${tenantId} AND property_id <> ALL(${propertyIds}::text[])`;
 }
 
 /**
@@ -919,20 +924,22 @@ export async function migrateOutcomeLabelsToKeys(): Promise<void> {
 }
 
 export async function backfillShortlist(): Promise<void> {
-  const rows = await sql`SELECT id, tenant_id, shortlist, feedback FROM crm_leads`;
-  for (const r of rows) {
+  const leads = await sql`SELECT id, tenant_id, shortlist, feedback FROM crm_leads`;
+  const rows: any[] = [];
+  for (const r of leads) {
     const shortlist: string[] = r.shortlist || [];
     const feedback: Record<string, any> = r.feedback || {};
-    const propertyIds = Array.from(new Set([...shortlist, ...Object.keys(feedback)]));
-    for (const pid of propertyIds) {
+    for (const pid of Array.from(new Set([...shortlist, ...Object.keys(feedback)]))) {
       const fb = feedback[pid] || {};
-      const id = `shl_${r.id}_${pid}`;
-      await sql`
-        INSERT INTO lead_shortlist (id, tenant_id, lead_id, property_id, verdict, reason)
-        VALUES (${id}, ${r.tenant_id || DEFAULT_TENANT_ID}, ${r.id}, ${pid}, ${fb.verdict ?? null}, ${fb.reason ?? null})
-        ON CONFLICT (lead_id, property_id) DO NOTHING;
-      `;
+      rows.push({ id: `shl_${r.id}_${pid}`, tenant_id: r.tenant_id || DEFAULT_TENANT_ID, lead_id: r.id, property_id: pid,
+        verdict: fb.verdict ?? null, reason: fb.reason ?? null });
     }
+  }
+  // A thousand rows a statement, not one: this ran an INSERT per shortlisted
+  // property in every firm, in turn.
+  for (let i = 0; i < rows.length; i += 1000) {
+    await sql`INSERT INTO lead_shortlist ${sql(rows.slice(i, i + 1000), 'id', 'tenant_id', 'lead_id', 'property_id', 'verdict', 'reason')}
+              ON CONFLICT (lead_id, property_id) DO NOTHING`;
   }
 }
 
@@ -2137,7 +2144,14 @@ export async function getLeadById(id: string): Promise<any | undefined> {
     description: r.description, author: r.author, metadata: r.metadata,
     timestamp: r.timestamp instanceof Date ? r.timestamp.toISOString() : String(r.timestamp)
   }));
-  const lead = rowToLead(rows[0], events, shortlistRows, await legacyEventNames(events as any));
+  // The shortlist's ids are known once the rows are; the names and the flats
+  // are two independent reads, so they go together.
+  const shortlistIds = (shortlistRows.length ? shortlistRows.map((sr: any) => sr.property_id) : rows[0].shortlist) || [];
+  const [names, props] = await Promise.all([
+    legacyEventNames(events as any),
+    shortlistIds.length ? sql`SELECT * FROM crm_properties WHERE tenant_id = ${t} AND id IN ${sql(shortlistIds)}` : [],
+  ]);
+  const lead = rowToLead(rows[0], events, shortlistRows, names);
 
   // THE SHORTLISTED PROPERTIES THEMSELVES, not only their ids. The record screen
   // resolved each id through the browser's property cache, which holds whatever
@@ -2147,10 +2161,7 @@ export async function getLeadById(id: string): Promise<any | undefined> {
   // inventory yet". The attach had worked every time; only the reading of it was
   // broken, so agents attached the same lead again and again. The WhatsApp
   // composer read the same cache and offered "No property — message only".
-  const ids: string[] = lead.shortlist || [];
-  lead.shortlistProps = ids.length
-    ? (await sql`SELECT * FROM crm_properties WHERE tenant_id = ${t} AND id IN ${sql(ids)}`).map(rowToProperty)
-    : [];
+  lead.shortlistProps = (props as any[]).map(rowToProperty);
 
   // Activities live in their own table and were never folded in, so a logged
   // site visit existed only in the database — photo, GPS fix and outcome
@@ -2574,36 +2585,39 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
     }
   }
 
-  if (patch.shortlist !== undefined || patch.feedback !== undefined) {
-    await syncLeadShortlist(id, shortlist || [], feedback || {}, tid());
-  }
-
   // ATTACHED AND REMOVED, ON BOTH RECORDS (7.6). The lead's history showed
   // "Shortlisted …" only in the browser that did it (a local echo nothing
   // saved), and the flat never knew. Now the lead says which flat, and the
   // flat says for whom.
+  let added: string[] = [], changed: string[] = [];
   if (patch.shortlist !== undefined) {
     const was = new Set<string>(oldLead?.shortlist || []);
     const now = new Set<string>(shortlist || []);
-    const added = [...now].filter(x => !was.has(x));
-    const removed = [...was].filter(x => !now.has(x));
-    const changed = [...added, ...removed];
-    if (changed.length) {
-      const flats = await sql`SELECT id, project, wing, unit_no, title FROM crm_properties
-                               WHERE tenant_id = ${tid()} AND id IN ${sql(changed)}`;
-      const nameOf = new Map((flats as any[]).map(f => [f.id,
-        [f.project, [f.wing, f.unit_no].filter(Boolean).join('-')].filter(Boolean).join(' ') || f.title || 'a property']));
-      const who = oldLead?.name || oldLead?.phone || 'a lead';
-      const author = ctx.actorId ?? getContext()?.userId ?? 'System';
-      for (const pid of changed) {
-        if (!nameOf.has(pid)) continue;
-        const on = added.includes(pid);
-        await addTimelineEvent({ record_id: id, type: 'shortlist', title: on ? 'Shortlisted' : 'Taken off the shortlist',
-          description: nameOf.get(pid), author, metadata: { propertyId: pid } }).catch(() => {});
-        await addTimelineEvent({ record_id: pid, type: 'shortlist', title: on ? 'Shortlisted' : 'Taken off the shortlist',
-          description: `For ${who}`, author, metadata: { leadId: id } }).catch(() => {});
-      }
-    }
+    added = [...now].filter(x => !was.has(x));
+    changed = [...added, ...[...was].filter(x => !now.has(x))];
+  }
+  // The sync and the names of the flats it moved do not wait on each other.
+  const [, flats] = await Promise.all([
+    (patch.shortlist !== undefined || patch.feedback !== undefined)
+      ? syncLeadShortlist(id, shortlist || [], feedback || {}, tid()) : null,
+    changed.length
+      ? sql`SELECT id, project, wing, unit_no, title FROM crm_properties
+             WHERE tenant_id = ${tid()} AND id IN ${sql(changed)}` : [],
+  ]);
+  if (changed.length) {
+    const nameOf = new Map((flats as any[]).map(f => [f.id,
+      [f.project, [f.wing, f.unit_no].filter(Boolean).join('-')].filter(Boolean).join(' ') || f.title || 'a property']));
+    const who = oldLead?.name || oldLead?.phone || 'a lead';
+    const author = ctx.actorId ?? getContext()?.userId ?? 'System';
+    // One INSERT for the lot: two events per flat, awaited in turn, were
+    // fourteen round trips for seven flats.
+    await addTimelineEvents(changed.filter(pid => nameOf.has(pid)).flatMap(pid => {
+      const title = added.includes(pid) ? 'Shortlisted' : 'Taken off the shortlist';
+      return [
+        { record_id: id, type: 'shortlist', title, description: nameOf.get(pid), author, metadata: { propertyId: pid } },
+        { record_id: pid, type: 'shortlist', title, description: `For ${who}`, author, metadata: { leadId: id } },
+      ];
+    })).catch(() => {});
   }
 
   if (patch.stage && patch.stage !== oldLead.stage) {
@@ -6873,6 +6887,29 @@ export async function getTimelineEvents(recordId?: string): Promise<TimelineEven
     timestamp: r.timestamp instanceof Date ? r.timestamp.toISOString() : String(r.timestamp),
     metadata: r.metadata || {},
   }));
+}
+
+/**
+ * Several events in ONE INSERT, for events nothing reacts to. addTimelineEvent
+ * alerts a lead's holder about a note or remark; that does not run here, so
+ * those types are refused rather than silently left unannounced. Timestamps
+ * step a millisecond apart so the events keep the order they were given in.
+ */
+export async function addTimelineEvents(evts: Omit<TimelineEvent, 'id' | 'timestamp'>[]): Promise<void> {
+  if (!evts.length) return;
+  if (evts.some(e => e.type === 'note' || e.type === 'remark')) {
+    throw new Error('addTimelineEvents: a note or remark goes through addTimelineEvent');
+  }
+  const t = tid();
+  const at = Date.now();
+  const rows = evts.map((e, i) => ({
+    id: `evt_${at}_${i}_${Math.random().toString(36).substring(2, 6)}`,
+    record_id: e.record_id, type: e.type, title: e.title, description: e.description,
+    author: e.author || 'System', timestamp: new Date(at + i).toISOString(),
+    metadata: sql.json(e.metadata || {}) as any, tenant_id: t,
+  }));
+  await sql`INSERT INTO crm_timeline_events ${sql(rows, 'id', 'record_id', 'type', 'title', 'description', 'author', 'timestamp', 'metadata', 'tenant_id')}
+            ON CONFLICT (id) DO NOTHING`;
 }
 
 export async function addTimelineEvent(evt: Omit<TimelineEvent, 'id' | 'timestamp'> & { timestamp?: string }): Promise<TimelineEvent> {

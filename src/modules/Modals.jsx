@@ -522,7 +522,8 @@ function AttachPropModal({ store, leadId }) {
   const attach = (p) => {
     if (added.includes(p.id)) return
     setAdded(a => [...a, p.id])
-    store.attachProp(leadId, p.id, [p.society, unitLabel(p)].filter(Boolean).join(' '))
+    // Marked at once; unmarked if the server refused it.
+    store.attachProp(leadId, p.id).then(res => { if (!res) setAdded(a => a.filter(x => x !== p.id)) })
   }
 
   const emptyLine = searching ? 'Nothing matches that search.'
