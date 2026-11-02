@@ -730,6 +730,9 @@ function reducer(state, action) {
     case 'DELETE_PROPERTIES':
       return dropRecords(state, 'property', Array.isArray(action.ids) ? action.ids : [action.ids])
 
+    case 'PROP_PATCH':
+      return patchRecord(state, 'property', action.propId, p => ({ ...p, ...action.patch }))
+
     case 'PROP_STATUS':
       return patchRecord(state, 'property', action.propId, p => ({ ...p, status: action.status }))
 
@@ -1781,9 +1784,21 @@ export function StoreProvider({ children }) {
     // to the status the listing actually had if the write is refused.
     // 7.1 / 7.5: the server answers with the whole listing, which replaces the
     // cached one, so the badge, the link and the history move together.
-    verifyProperty: (propId, on) => apiClient.verifyProperty(propId, on)
-      .then(r => { if (r?.property) dispatch({ type: 'CACHE_RECORDS', kind: 'property', records: [r.property] }); toast(on ? 'Marked as verified' : 'Verification removed'); return r?.property })
-      .catch(() => { toast('Could not save. Try again.', 'warn') }),
+    // It sat under that comment and waited (~1.3s) all the same: the badge
+    // now moves on the tap, the reply then replaces the listing whole, and a
+    // refusal puts the mark back as it was.
+    verifyProperty: (propId, on) => {
+      const p = api.lookup('property', propId)
+      const prev = { verifiedAt: p?.verifiedAt ?? null, verifiedBy: p?.verifiedBy ?? null }
+      return optimistic(on ? 'Verify' : 'Remove verified',
+        () => dispatch({ type: 'PROP_PATCH', propId, patch: on ? { verifiedAt: new Date().toISOString(), verifiedBy: state.session?.userId ?? null } : { verifiedAt: null, verifiedBy: null } }),
+        () => dispatch({ type: 'PROP_PATCH', propId, patch: prev }),
+        () => apiClient.verifyProperty(propId, on).then(r => {
+          if (r?.property) dispatch({ type: 'CACHE_RECORDS', kind: 'property', records: [r.property], adopted: true })
+          return r
+        }),
+        on ? 'Marked as verified' : 'Verification removed', 'property').then(r => r?.property)
+    },
     setPropertyGallery: (propId, action) => apiClient.setPropertyGallery(propId, action)
       .then(r => { if (r?.property) dispatch({ type: 'CACHE_RECORDS', kind: 'property', records: [r.property] }); return r?.property })
       .catch(() => { toast('Could not save. Try again.', 'warn') }),
