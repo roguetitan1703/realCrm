@@ -1,9 +1,12 @@
 # Work state
 
 ## Now
-Release waits on Om: (1) promote 0695296 in Vercel — realestate.delpat.in still serves 27 Oct (a036eb4), API runs 6078505 (28 Oct); (2) his go to push development to main (smoke 41/41 on 6589451: adds one-line desk tables, grouped search on Properties and Calling, compact project rows; no forced password change, Om 2 Nov); (3) EC2: `npm run deploy:api` (runs the closed-lead repair once: bhumi 23, mahalaxmi 9), `npm run backup` + cron. Frontend before backend.
+Actions feel slow (Om 2 Nov): every save waits on the server, several round trips each. A on `a-auth-speed`: 3 round trips of auth per request (session SELECT+UPDATE, uncached settings, lead saves authenticated twice) — security review before merge. B on `b-speed`: shortlist batching + optimistic attach, rename/undo time.
+Release 2 Nov: main = c440165 pushed (Om's go), API live on c440165, closed-lead repair ran (bhumi 23, mahalaxmi 9, urban 2, delpat 1; 0 left). Waits on Om: promote c440165 in Vercel (built green, site still old), and the backup — pg_dump 17 from PGDG (prod is Postgres 17.6), first `npm run backup`, cron.
 
 ## Next
+S1. Speed, after B's shortlist work (audit 2 Nov, ranked): owner status/callback optimistic + store the returned owner + Owners.jsx `fetched || cached` prefers stale fetched; Record call = one endpoint (contact-log + editRemark + callback in sequence today); follow-up/Callback modal closes at once; inline assign and AssignModal optimistic, notify after responding; Add remark closes at once; Today "Done" leaves at once; reject owner one request; skip refetching the lead a write just returned and narrow what `settled()` refreshes; updateLead reads the lead twice; hand-out rota N locked queries → `dealRota(n)`; moveAll per-target loop; property edit per-field events; verifyProperty labelled optimistic but is not
+S2. Bug: `noteOwnerContact` (store.ts ~4740) reportedly writes "Stage → Contacted" on every contact with an owner already Contacted — verify, then fix with S1
 0. UI review (docs/specs/ui-review.md, published for Om): waits on Om picking proposals; recommended P1 after-call sheet + P3 one word one number
 1. Phone UI and UX, new from the user flows (the earlier spec 9d5b0f7 rearranged the current screens and is superseded): the fresh design is on `b-phone-redesign` (c7e7aa1, docs/specs/phone-ui/) and published for Om. Waits on his review and its 9 decisions plus follow-ups D1–D5. Then slice 1: the after-call sheet, its `call-result` write, ack + Undo. Built on its own branch, merged only when Om approves it whole
 2. Feed watch: owner alert merged (28a7fe9); production read 28 Oct: 0 alerts at bhumi/mahalaxmi, 2 at delpat. Delpat half (console view, a daily email to Om via sendMail) waits on Om
