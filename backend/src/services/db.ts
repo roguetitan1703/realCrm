@@ -13,6 +13,7 @@ import { databaseUrl, assertEnvMatchesDatabase, assertRequiredConfig, appEnv } f
 import { planPhones } from './phoneRepair';
 import { isLocalDatabase, pgOptions } from './pgOptions';
 import { ensureDevDataTable } from './devData';
+import { ensureDemoLedger } from './demoRefresh';
 
 // 1. Zero-dependency .env loader
 
@@ -656,6 +657,8 @@ export async function initSchema(): Promise<void> {
     // (services/devData.ts). A development database only: production has no
     // synthetic firm to move.
     if (appEnv() === 'development') await ensureDevDataTable(sql);
+    // The day each demo firm's data is anchored to (services/demoRefresh.ts).
+    await ensureDemoLedger(sql);
 
     console.log('[Supabase DB] ✅ PostgreSQL schema initialization completed successfully.');
   } catch (err: any) {

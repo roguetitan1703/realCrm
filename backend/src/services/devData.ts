@@ -19,7 +19,8 @@
  * seed-demo-tenant are recognised by its own marker and adopted). Never a
  * paying firm, by slug, even on a development database. Never outside
  * APP_ENV=development, except shiftTenantDates itself, which seed-demo-tenant
- * runs on its own demo firm wherever that lives.
+ * runs on its own demo firm wherever that lives, and services/demoRefresh.ts
+ * runs on the named demo firms on every database.
  * ============================================================================
  */
 import { appEnv } from './env';
@@ -30,6 +31,8 @@ type Sql = any;
 export const PAYING_TENANTS = new Set(['bhumi', 'mahalaxmi']);
 
 const MARKERS = 'dev_synthetic_tenants';
+/** The production demo firms' ledger (services/demoRefresh.ts). */
+export const DEMO_LEDGER = 'demo_refresh_tenants';
 const DEFAULT_TZ = 'Asia/Kolkata';
 
 // Tables whose times are not the firm's story: credentials, sessions, the
@@ -39,15 +42,17 @@ const DEFAULT_TZ = 'Asia/Kolkata';
 const SKIP_TABLES = new Set([
   'tenants', 'users', 'sessions', 'auth_otp', 'password_resets', 'superadmins',
   'audit_log', 'audit_checks', 'schema_migrations', 'push_subscriptions', 'push_gone_endpoints',
-  'crm_job_runs', 'crm_public_form_days', 'crm_settings', 'crm_routing_rules', MARKERS,
+  'crm_job_runs', 'crm_public_form_days', 'crm_settings', 'crm_routing_rules', MARKERS, DEMO_LEDGER,
   // What a firm owes Delpat is Delpat's calendar, not the firm's story.
   'tenant_billing', 'tenant_billing_payments',
 ]);
 // A claim on an inbox row is a lock, not a fact about the past.
 const SKIP_COLUMNS = new Set(['claimed_at', 'locked_until']);
-// Things that happened. Shifted forward, one that lands after now goes back a
-// day: data made this afternoon, moved forward a day, would otherwise be
-// tomorrow's history when the refresh runs in the morning.
+// Things that happened. Shifted forward, one that lands after now goes back
+// the whole days it takes to be before now: data made this afternoon, moved
+// forward a day, would otherwise be tomorrow's history when the refresh runs
+// in the morning, and a row the system touched after the day a demo firm is
+// anchored to (an updated_at) would be next week's.
 const HISTORY: [string, string][] = [
   ['crm_timeline_events', 'timestamp'], ['activities', 'at'], ['activities', 'created_at'],
   ['crm_leads', 'created_at'], ['crm_leads', 'updated_at'], ['crm_owners', 'created_at'], ['crm_owners', 'updated_at'],
@@ -57,9 +62,14 @@ const HISTORY: [string, string][] = [
 ];
 const ISO = 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"';
 
-function refusePaying(tenantId: string) {
-  if (PAYING_TENANTS.has(String(tenantId).toLowerCase())) {
-    throw new Error(`Refusing: "${tenantId}" is a paying firm. Its dates are never moved, on any database.`);
+// By id and by the slug the id resolves to: the list is slugs, and an id that
+// ever stops equalling its slug must not slip past it.
+async function refusePaying(sql: Sql, tenantId: string) {
+  const [t] = await sql`SELECT slug FROM tenants WHERE id = ${tenantId}`;
+  for (const name of [tenantId, t?.slug]) {
+    if (name && PAYING_TENANTS.has(String(name).toLowerCase())) {
+      throw new Error(`Refusing: "${tenantId}" is a paying firm. Its dates are never moved, on any database.`);
+    }
   }
 }
 
@@ -68,7 +78,7 @@ function refusePaying(tenantId: string) {
  * Returns rows changed per table. Runs inside whatever transaction `sql` is.
  */
 export async function shiftTenantDates(sql: Sql, tenantId: string, days: number): Promise<Record<string, number>> {
-  refusePaying(tenantId);
+  await refusePaying(sql, tenantId);
   if (!Number.isInteger(days) || days < 1) return {};
   const cols: { table_name: string; column_name: string; data_type: string }[] = await sql`
     SELECT c.table_name, c.column_name, c.data_type
@@ -120,19 +130,22 @@ export async function shiftTenantDates(sql: Sql, tenantId: string, days: number)
   let stepped = 0;
   for (const [t, c] of HISTORY) {
     if (!byTable.get(t)?.some(x => x.column_name === c)) continue;
-    const r = await sql`UPDATE ${sql(t)} SET ${sql(c)} = ${sql(c)} - interval '1 day' WHERE tenant_id = ${tenantId} AND ${sql(c)} > now()`;
+    const r = await sql`UPDATE ${sql(t)} SET ${sql(c)} = ${sql(c)} - make_interval(days => ceil(extract(epoch FROM ${sql(c)} - now()) / 86400)::int)
+                         WHERE tenant_id = ${tenantId} AND ${sql(c)} > now()`;
     stepped += r.count;
   }
   if (stepped) counts['history stepped back to before now'] = stepped;
 
-  // The two records of which day this firm's data is anchored to move with it,
-  // so neither path (this one, or seed-demo-tenant --refresh) moves it twice.
+  // The records of which day this firm's data is anchored to move with it, so
+  // no path (this one, seed-demo-tenant --refresh, the demo refresh) moves it twice.
   await sql`
     UPDATE tenants SET brand_config = jsonb_set(brand_config, '{demo,anchor}',
            to_jsonb(to_char(((brand_config->'demo'->>'anchor')::timestamptz + make_interval(days => ${days})) AT TIME ZONE 'UTC', ${ISO})))
      WHERE id = ${tenantId} AND brand_config->'demo'->>'anchor' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'`;
   const [{ has }] = await sql`SELECT to_regclass(${'public.' + MARKERS}) IS NOT NULL AS has`;
   if (has) await sql`UPDATE ${sql(MARKERS)} SET refreshed_on = refreshed_on + ${days}::int, refreshed_at = now() WHERE tenant_id = ${tenantId}`;
+  const [{ demo }] = await sql`SELECT to_regclass(${'public.' + DEMO_LEDGER}) IS NOT NULL AS demo`;
+  if (demo) await sql`UPDATE ${sql(DEMO_LEDGER)} SET refreshed_on = refreshed_on + ${days}::int, refreshed_at = now() WHERE tenant_id = ${tenantId}`;
   return counts;
 }
 
@@ -152,8 +165,11 @@ export async function ensureDevDataTable(sql: Sql): Promise<void> {
     )`;
 }
 
-const firmToday = (sql: Sql, tenantId: string) => sql`(now() AT TIME ZONE coalesce(
-  (SELECT nullif(value->>'timezone', '') FROM crm_settings WHERE tenant_id = ${tenantId} AND key = 'default' LIMIT 1), ${DEFAULT_TZ}))::date`;
+/** The firm's timezone, as a SQL expression. */
+export const firmZone = (sql: Sql, tenantId: string) => sql`coalesce(
+  (SELECT nullif(value->>'timezone', '') FROM crm_settings WHERE tenant_id = ${tenantId} AND key = 'default' LIMIT 1), ${DEFAULT_TZ})`;
+/** Today in the firm's timezone, as a SQL expression. */
+export const firmToday = (sql: Sql, tenantId: string) => sql`(now() AT TIME ZONE ${firmZone(sql, tenantId)})::date`;
 
 function requireDevelopment(what: string) {
   if (appEnv() !== 'development') throw new Error(`${what} runs on a development database only (APP_ENV is "${appEnv()}").`);
@@ -166,7 +182,7 @@ function requireDevelopment(what: string) {
  */
 export async function adoptSynthetic(sql: Sql, tenantId: string, seededBy: string): Promise<void> {
   requireDevelopment('Marking a firm synthetic');
-  refusePaying(tenantId);
+  await refusePaying(sql, tenantId);
   await ensureDevDataTable(sql);
   await sql`INSERT INTO dev_synthetic_tenants (tenant_id, seeded_by, refreshed_on)
             VALUES (${tenantId}, ${seededBy}, ${firmToday(sql, tenantId)})
@@ -213,18 +229,4 @@ export async function refreshDevData(sql: Sql, opts: { only?: string; log?: (s: 
       + ` (${Object.entries(done.counts).map(([k, n]) => `${k} ${n}`).join(', ') || 'nothing dated'})`);
   }
   return out;
-}
-
-/**
- * The server's half: once when the schema is ready, then every ten minutes,
- * which is how the day's turn is noticed while it runs. Development only.
- */
-export function startDevRefresh(sql: Sql, ready: Promise<unknown>): void {
-  if (appEnv() !== 'development') return;
-  const run = () => refreshDevData(sql).catch((e: any) => console.warn('[Dev data] refresh failed:', e?.message));
-  ready.then(async () => {
-    const moved = await run();
-    if (Array.isArray(moved) && !moved.length) console.log('[Dev data] synthetic firms are dated today; nothing to move');
-    setInterval(run, 10 * 60 * 1000).unref?.();
-  });
 }
