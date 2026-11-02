@@ -156,17 +156,22 @@ export default function App() {
   // the login gate and the phone/desk switch return before the sidebar exists,
   // so a read placed next to its consumer would change the hook order on the
   // frame someone signs in or resizes past 1024px.
+  //
+  // THE DESK'S SIDEBAR ONLY. The phone chrome has no sidebar (its tab badges
+  // come from the Today feed), and these two went out on every phone screen
+  // for nothing: two of the six requests a phone made before its own.
+  const sidebar = state.loggedIn && !isPhone
   const { data: desk } = useServerData(
-    () => (state.loggedIn ? api.getDeskSummary() : Promise.resolve(null)),
-    [state.dataAsOf, state.loggedIn],
+    () => (sidebar ? api.getDeskSummary() : Promise.resolve(null)),
+    [state.dataAsOf, sidebar],
     null,
     '/workspace/desk-summary',
   )
   // The calling queue's own counts — same read the Calling screen and Today
   // use, so the sidebar badge and the screen it opens never disagree.
   const { data: ownerSummary } = useServerData(
-    () => (state.loggedIn ? api.getOwnersSummary() : Promise.resolve(null)),
-    [state.dataAsOf, state.loggedIn],
+    () => (sidebar ? api.getOwnersSummary() : Promise.resolve(null)),
+    [state.dataAsOf, sidebar],
     null,
     '/owners/summary',
   )

@@ -398,12 +398,16 @@ export default function Today({ store, go, topBar, sel = {}, phone = true }) {
   const hasCalling = isDesk
     ? (firmOwners?.summary?.queue?.total || 0) > 0
     : Object.values(oc).some(v => Number(v) > 0)
-  // What they hold now, for My work's "Holds now". Scoped by the server.
-  const { data: desk } = useServerData(() => api.getDeskSummary(), [state.dataAsOf], null, '/workspace/desk-summary')
+  const view = ['work', 'team'].includes(sel.todayView) && (sel.todayView !== 'team' || isDesk) ? sel.todayView : 'todo'
+  // What they hold now, for My work's "Holds now" and the Team board. Scoped by
+  // the server. A phone's To do tab shows neither, and it is where the phone
+  // opens, so it is asked for when one of those is on screen.
+  const needBook = !phone || view !== 'todo'
+  const { data: desk } = useServerData(() => (needBook ? api.getDeskSummary() : Promise.resolve(null)),
+    [state.dataAsOf, needBook], null, needBook ? '/workspace/desk-summary' : null)
   const settling = feed.loading || (isDesk && firmLoading && !firmOwners)
   const me = state.activeAgentId || state.session?.userId || null
   const startSide = hasCalling && !feed.leads.length ? 'calling' : 'leads'
-  const view = ['work', 'team'].includes(sel.todayView) && (sel.todayView !== 'team' || isDesk) ? sel.todayView : 'todo'
   const setView = (v) => go('today', { todayView: v === 'todo' ? undefined : v, person: undefined })
 
   // A teammate's page, opened from the Team tab.

@@ -284,7 +284,9 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     }),
     // Same as Leads: a row you just called keeps its place in the queue.
     { filters: {}, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone,
-      holdOrder: true, viewDeps: [tab, status, agentSel, projectSel, towerSel, configSel, phone] },
+      holdOrder: true, viewDeps: [tab, status, agentSel, projectSel, towerSel, configSel, phone],
+      // Grouped by project shows cards, not this page of rows.
+      off: view === 'projects' },
     [state.dataAsOf, tab, status, agentSel, projectSel, towerSel, configSel, phone],
     { store, kind: 'owner' },
   )
@@ -293,8 +295,11 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     () => api.getOwnerTabs({ ...scope, segment, stage: status }).then(r => r?.tabs || {}),
     [state.dataAsOf, q, tab, status, agentSel, projectSel, towerSel, configSel, phone], {})
 
+  // The picked project's towers, for the Tower filter. Without a project there
+  // is no tower to offer, and this was a second firm-wide project read beside
+  // the cards' own on every load.
   const { data: projectList } = useServerData(
-    () => api.listOwnerProjects().then(r => r?.data || []), [state.dataAsOf], [])
+    () => (projectSel ? api.listOwnerProjects().then(r => r?.data || []) : Promise.resolve([])), [state.dataAsOf, !!projectSel], [])
   const currentProject = (projectList || []).find(p => (p.key === 'No project' ? '_none' : p.key) === projectSel)
   const facets = {
     towers: (currentProject?.towers || []).map(t => ({ value: t, label: t })),

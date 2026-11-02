@@ -361,7 +361,12 @@ function reducer(state, action) {
         settings: s.settings ? { ...state.settings, ...s.settings } : state.settings,
         routing: s.routing_rules ? { ...state.routing, ...s.routing_rules } : state.routing,
         brand: s.brand ? { ...state.brand, ...s.brand } : state.brand,
-        dataAsOf: action.at || Date.now(),
+        // MOVED ONLY WHEN THE DESK DID. Every screen refetches when this moves,
+        // and the boot read lands a second after those screens asked: moving
+        // it then sent each of them again (the unassigned bar, which skips the
+        // read cache, twice per load). The pulse's read, sent because the
+        // change token moved, is the one that means "look again".
+        dataAsOf: action.refresh ? Date.now() : state.dataAsOf,
         dataStale: false,   // fresh from the server
       }
     }
@@ -791,6 +796,25 @@ export function StoreProvider({ children }) {
   setFirmLocale(state.settings?.locale)
   const timers = useRef({})
 
+  // Pull the current user's alert feed. No-op without a token (the feed is
+  // per-user, so it needs an authenticated identity).
+  const loadNotifications = useCallback(() => {
+    if (!apiClient.getToken?.()) return
+    apiClient.getNotifications()
+      .then(res => { if (res?.success) dispatch({ type: 'SET_NOTIFICATIONS', notifications: res.notifications, unread: res.unread }) })
+      .catch(err => console.warn('[Notifications] load failed:', err.message))
+  }, [])
+
+  // The bell's number, without the pile behind it. This is what boot and the
+  // pulse poll want: the drawer's rows are fetched when the drawer opens, and
+  // fetching them on every page load was the single biggest read on the desk.
+  const loadNotifUnread = useCallback(() => {
+    if (!apiClient.getToken?.()) return
+    apiClient.getNotifUnread()
+      .then(res => { if (res?.success) dispatch({ type: 'SET_NOTIFICATIONS', notifications: null, unread: res.unread }) })
+      .catch(err => console.warn('[Notifications] count failed:', err.message))
+  }, [])
+
   // Pull the authoritative, tenant-scoped state from the backend. Called on
   // mount AND right after login — the token/tenant changes at login, so the
   // desk must re-fetch under the new identity or it keeps showing whatever
@@ -808,10 +832,14 @@ export function StoreProvider({ children }) {
     return apiClient.getBootstrap()
       .then(res => {
         if (res && res.success && res.state) {
-          dispatch({ type: 'HYDRATE_SERVER', state: res.state })
+          dispatch({ type: 'HYDRATE_SERVER', state: res.state, refresh: background })
           writeStateCache(res.state)   // keep a snapshot for the next offline load
           // Absent (the server could not read it) keeps what we had.
           if ('billing' in res) dispatch({ type: 'SET_BILLING', billing: res.billing })
+          // The bell's number rides on the same read. An API older than this
+          // build does not send it, and then the count is asked for itself.
+          if (typeof res.unread === 'number') dispatch({ type: 'SET_NOTIFICATIONS', notifications: null, unread: res.unread })
+          else loadNotifUnread()
         }
       })
       .catch(err => {
@@ -835,7 +863,7 @@ export function StoreProvider({ children }) {
         const cached = readStateCache()
         if (cached) dispatch({ type: 'HYDRATE_CACHE', state: cached.state, at: cached.at })
       })
-  }, [])
+  }, [loadNotifUnread])
 
   // A SESSION CAN END WHILE THE APP IS OPEN.
   //
@@ -867,9 +895,8 @@ export function StoreProvider({ children }) {
   // 401 and make a signed-out app look like a backend outage.
   useEffect(() => {
     if (!apiClient.getToken?.()) return
+    // The bell's NUMBER comes with it, not the pile behind it.
     loadServerState()
-    // The bell's NUMBER, not the pile behind it.
-    loadNotifUnread()
   }, [])
 
   // Paint the desk in the tenant's accent whenever it changes (hydrate, edit,
@@ -918,25 +945,6 @@ export function StoreProvider({ children }) {
     // note in lib/pwa.js.
     applyPwaIdentity(tid, state.settings.firmName)
   }, [state.settings.firmName, state.settings.city, state.brand?.primaryColor, state.brand?.logoUrl, state.tenant?.slug, state.tenant?.id])
-
-  // Pull the current user's alert feed. No-op without a token (the feed is
-  // per-user, so it needs an authenticated identity).
-  const loadNotifications = useCallback(() => {
-    if (!apiClient.getToken?.()) return
-    apiClient.getNotifications()
-      .then(res => { if (res?.success) dispatch({ type: 'SET_NOTIFICATIONS', notifications: res.notifications, unread: res.unread }) })
-      .catch(err => console.warn('[Notifications] load failed:', err.message))
-  }, [])
-
-  // The bell's number, without the pile behind it. This is what boot and the
-  // pulse poll want: the drawer's rows are fetched when the drawer opens, and
-  // fetching them on every page load was the single biggest read on the desk.
-  const loadNotifUnread = useCallback(() => {
-    if (!apiClient.getToken?.()) return
-    apiClient.getNotifUnread()
-      .then(res => { if (res?.success) dispatch({ type: 'SET_NOTIFICATIONS', notifications: null, unread: res.unread }) })
-      .catch(err => console.warn('[Notifications] count failed:', err.message))
-  }, [])
 
   // ── Live refresh ──────────────────────────────────────────────────────────
   // The desk used to load once and then quietly go stale: a lead routed in by a
@@ -996,7 +1004,6 @@ export function StoreProvider({ children }) {
           pulseRef.current = token
           quiet = 0
           await loadServerState(true)
-          loadNotifUnread()
         } else {
           quiet++
         }
@@ -1787,8 +1794,8 @@ export function StoreProvider({ children }) {
       // Re-fetch under the just-authenticated tenant so the desk shows THIS
       // firm's data (empty for a new tenant), not whatever loaded for the
       // default tenant before login.
+      // The bell's count comes with it; the drawer's rows when it opens.
       loadServerState()
-      setTimeout(loadNotifications, 0)
     },
     /**
      * Enter a workspace this browser is already signed into, without a reload.
@@ -1799,7 +1806,6 @@ export function StoreProvider({ children }) {
       if (!s.loggedIn) return false
       dispatch({ type: 'RESTORE_SESSION', session: s })
       loadServerState()
-      setTimeout(loadNotifications, 0)
       return true
     },
     logout: () => {

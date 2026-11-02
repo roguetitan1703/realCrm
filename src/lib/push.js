@@ -90,6 +90,21 @@ export async function isPushSubscribed() {
 
 const isGone = (e) => /API Error: 410\b/.test(String(e?.message || ''));
 
+/**
+ * Send the state only when it changed for this sign-in. It went out on every
+ * page load (a write each time, on a server that reads only the latest value),
+ * so the same "on" was posted with every screen anyone opened.
+ */
+function sendState(state) {
+  const token = api.getToken?.() || '';
+  const key = 'crm_push_state_' + (window.location.pathname.split('/')[1] || '');
+  const stamp = token.slice(-24) + ':' + state;
+  try { if (localStorage.getItem(key) === stamp) return Promise.resolve(); } catch { /* private window */ }
+  return api.reportPushState(state).then(() => {
+    try { localStorage.setItem(key, stamp); } catch { /* private window */ }
+  });
+}
+
 /** Tell the server what this sign-in's browser says about alerts. Best effort. */
 async function reportState() {
   const s = await pushStatus().catch(() => null);
@@ -99,7 +114,7 @@ async function reportState() {
     : s.ok ? 'on'
     : s.permission === 'default' ? 'default'
     : 'off';
-  await api.reportPushState(state).catch(() => {});
+  await sendState(state).catch(() => {});
 }
 
 function urlBase64ToUint8Array(base64String) {
@@ -192,7 +207,7 @@ export async function pushStatus() {
  * attempt per device: if the person says no, we do not nag on every load.
  */
 export function autoEnablePush() {
-  if (!pushSupported()) { api.reportPushState('unsupported').catch(() => {}); return; }
+  if (!pushSupported()) { sendState('unsupported').catch(() => {}); return; }
   if (pushPermission() === 'denied') { reportState(); return; }
 
   const run = async () => {

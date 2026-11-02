@@ -35,9 +35,12 @@ const SEARCH_DEBOUNCE = 300
  *                 it with `store.lookup` instead of refetching it, and it is why
  *                 the in-memory collections can go away: the rows a screen has
  *                 already shown are the rows it needs to look up.
+ *
+ * `query.off` — the screen is not showing rows (grouped by project draws its
+ * own cards): nothing is asked for until it is back on.
  */
 export function useServerList(fetcher, query, deps = [], cache = null) {
-  const { filters, search, sortKey, sortDir, page = 1, pageSize = 20, accumulate = false, holdOrder = false, viewDeps } = query || {}
+  const { filters, search, sortKey, sortDir, page = 1, pageSize = 20, accumulate = false, holdOrder = false, viewDeps, off = false } = query || {}
 
   const [state, setState] = useState({ rows: [], total: 0, loading: true, error: null })
   const seq = useRef(0)
@@ -66,6 +69,7 @@ export function useServerList(fetcher, query, deps = [], cache = null) {
 
   useEffect(() => {
     const mine = ++seq.current
+    if (off) { setState(s => (s.loading ? { ...s, loading: false } : s)); return }
     setState(s => ({ ...s, loading: true, error: null }))
 
     Promise.resolve(fetcher({
@@ -114,7 +118,7 @@ export function useServerList(fetcher, query, deps = [], cache = null) {
         setState(s => ({ ...s, loading: false, error: err?.message || 'Could not load' }))
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterKey, debouncedSearch, sortKey, sortDir, page, pageSize, accumulate, depKey])
+  }, [filterKey, debouncedSearch, sortKey, sortDir, page, pageSize, accumulate, depKey, off])
 
   // A changed query starts the list over, so an accumulated phone list does not
   // keep page 1 of the old filter under page 1 of the new one.

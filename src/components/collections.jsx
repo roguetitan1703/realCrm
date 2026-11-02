@@ -205,7 +205,10 @@ export function ModuleListView({
 
   const pageList = onPage ? cut((page - 1) * pageSize, page * pageSize) : list
 
-  const body = list.length === 0
+  // Grouped by project draws its own cards, which do not depend on the page of
+  // rows: waiting for that page held the cards' own reads back by a round trip.
+  const body = view === 'projects' && renderTable ? renderTable(pageList, 'projects')
+    : list.length === 0
     ? (loading
         ? <ListSpinner />
         : <div className="empty"><div className="e-t">{emptyTitle || `No ${def.name.toLowerCase()} match`}</div><div className="e-s">{emptyHint || 'Try clearing a filter or search.'}</div></div>)
