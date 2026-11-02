@@ -635,6 +635,17 @@ function reducer(state, action) {
         timeline: withEvent(l, 'stage', 'Stage → ' + action.stage),
       }))
 
+    // A booking finished on this screen, and when: Today reads its rows
+    // through this, so the row leaves on the tap. Only a read of the day that
+    // left BEFORE this moment is overridden — a later one already knows, and a
+    // booking made after it must show.
+    case 'BOOKING_DONE': {
+      const next = { ...(state.doneBookings || {}) }
+      if (action.on) next[action.leadId] = Date.now()
+      else delete next[action.leadId]
+      return { ...state, doneBookings: next }
+    }
+
     case 'FOLLOWUP': {
       // fu === null means "marked done" — clearing the appointment, not setting one.
       //
@@ -718,6 +729,9 @@ function reducer(state, action) {
 
     case 'DELETE_PROPERTIES':
       return dropRecords(state, 'property', Array.isArray(action.ids) ? action.ids : [action.ids])
+
+    case 'PROP_PATCH':
+      return patchRecord(state, 'property', action.propId, p => ({ ...p, ...action.patch }))
 
     case 'PROP_STATUS':
       return patchRecord(state, 'property', action.propId, p => ({ ...p, status: action.status }))
@@ -1368,12 +1382,33 @@ export function StoreProvider({ children }) {
     touched: settled,
     cacheRecords: (kind, records, partial) => dispatch({ type: 'CACHE_RECORDS', kind, records, partial }),
 
+    // WHO HOLDS IT, at once. The picker closed and the row kept the old name
+    // for the ~1.5s the server took; now it moves on the tap and goes back,
+    // with the reason, if the server refuses (a colleague suspended since the
+    // screen loaded, an agent's session). The server still writes the
+    // assignment history; the reply replaces this guess (adopt).
     assign: (leadId, agentId) => {
       const a = state.agents.find(x => x.id === agentId)
-      return write('Assign',
-        () => apiClient.updateLead(leadId, { agentId }).then(adopt('lead')),
+      const prev = api.lookup('lead', leadId)?.agentId ?? null
+      return optimistic('Assign',
         () => dispatch({ type: 'ASSIGN', leadId, agentId }),
+        () => dispatch({ type: 'UPDATE_LEAD', leadId, patch: { agentId: prev } }),
+        () => apiClient.updateLead(leadId, { agentId }).then(adopt('lead')),
         'Lead assigned to ' + (a ? a.first : ''), 'lead')
+    },
+    // The Agent cell on a list row — the same, through the bulk route the
+    // cell has always used (one id).
+    assignRow: (kind, id, agentId) => {
+      const lead = kind === 'lead'
+      const prev = api.lookup(kind, id)?.agentId ?? null
+      return optimistic('Assign',
+        () => dispatch(lead ? { type: 'ASSIGN', leadId: id, agentId } : { type: 'UPDATE_OWNER', id, patch: { agentId } }),
+        () => dispatch(lead ? { type: 'UPDATE_LEAD', leadId: id, patch: { agentId: prev } } : { type: 'UPDATE_OWNER', id, patch: { agentId: prev } }),
+        // A refusal's words are in `message` here, which optimistic() would
+        // not read.
+        () => (lead ? apiClient.bulkAssignLeads([id], agentId) : apiClient.bulkAssignOwners([id], agentId))
+          .then(res => { if (res?.success === false) throw new Error(res.message || res.error || 'Could not assign'); return res }),
+        `${lead ? 'Lead' : 'Owner'} ${agentId ? 'assigned' : 'unassigned'}`, kind)
     },
     updateLead: (leadId, patch) => write('Update lead',
       () => apiClient.updateLead(leadId, patch).then(adopt('lead')),
@@ -1534,12 +1569,18 @@ export function StoreProvider({ children }) {
     // A booked meeting or demo, finished from Today with how it went. The
     // server clears the booking and writes its 'Completed' row; `settled()`
     // re-reads Today, so the row leaves the To do list.
-    completeFollowUp: (leadId, outcome, remark) => apiClient.completeFollowUp(leadId, outcome, remark)
-      .then(res => {
-        if (res?.success) { settled(); toast('Saved'); return res }
-        toast('Could not save', 'warn'); return null
-      })
-      .catch(err => { toast(err.message || 'Could not save. Try again.', 'warn'); return null }),
+    // DONE LEAVES AT ONCE. Today's row waited ~2s for the server and then a
+    // re-read of the day; the booking is cleared on the tap now (the cache, and
+    // the Today feed through `doneBookings`) and comes back, with a toast, if
+    // the server refuses. Resolves to the reply, or null on a refusal.
+    completeFollowUp: (leadId, outcome, remark) => {
+      const prev = api.lookup('lead', leadId)?.followUp ?? null
+      return optimistic('Follow-up',
+        () => { dispatch({ type: 'FOLLOWUP', leadId, followUp: null }); dispatch({ type: 'BOOKING_DONE', leadId, on: true }) },
+        () => { dispatch({ type: 'BOOKING_DONE', leadId, on: false }); if (prev) dispatch({ type: 'FOLLOWUP', leadId, followUp: prev }) },
+        () => apiClient.completeFollowUp(leadId, outcome, remark),
+        'Saved', 'lead')
+    },
     logActivity: (leadId, payload) => new Promise((resolve) => {
       apiClient.logActivity(leadId, payload)
         .then(res => {
@@ -1743,9 +1784,21 @@ export function StoreProvider({ children }) {
     // to the status the listing actually had if the write is refused.
     // 7.1 / 7.5: the server answers with the whole listing, which replaces the
     // cached one, so the badge, the link and the history move together.
-    verifyProperty: (propId, on) => apiClient.verifyProperty(propId, on)
-      .then(r => { if (r?.property) dispatch({ type: 'CACHE_RECORDS', kind: 'property', records: [r.property] }); toast(on ? 'Marked as verified' : 'Verification removed'); return r?.property })
-      .catch(() => { toast('Could not save. Try again.', 'warn') }),
+    // It sat under that comment and waited (~1.3s) all the same: the badge
+    // now moves on the tap, the reply then replaces the listing whole, and a
+    // refusal puts the mark back as it was.
+    verifyProperty: (propId, on) => {
+      const p = api.lookup('property', propId)
+      const prev = { verifiedAt: p?.verifiedAt ?? null, verifiedBy: p?.verifiedBy ?? null }
+      return optimistic(on ? 'Verify' : 'Remove verified',
+        () => dispatch({ type: 'PROP_PATCH', propId, patch: on ? { verifiedAt: new Date().toISOString(), verifiedBy: state.session?.userId ?? null } : { verifiedAt: null, verifiedBy: null } }),
+        () => dispatch({ type: 'PROP_PATCH', propId, patch: prev }),
+        () => apiClient.verifyProperty(propId, on).then(r => {
+          if (r?.property) dispatch({ type: 'CACHE_RECORDS', kind: 'property', records: [r.property], adopted: true })
+          return r
+        }),
+        on ? 'Marked as verified' : 'Verification removed', 'property').then(r => r?.property)
+    },
     setPropertyGallery: (propId, action) => apiClient.setPropertyGallery(propId, action)
       .then(r => { if (r?.property) dispatch({ type: 'CACHE_RECORDS', kind: 'property', records: [r.property] }); return r?.property })
       .catch(() => { toast('Could not save. Try again.', 'warn') }),

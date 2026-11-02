@@ -142,7 +142,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'propStatus' && <StatusModal store={store} propId={m.propId} />}
       {m?.kind === 'visitFeedback' && <VisitFeedbackModal store={store} leadId={m.leadId} propId={m.propId} />}
       {m?.kind === 'visitProof' && <VisitProofModal store={store} leadId={m.leadId} propId={m.propId} />}
-      {m?.kind === 'followUpDone' && <FollowUpDoneModal store={store} leadId={m.leadId} />}
+      {m?.kind === 'followUpDone' && <FollowUpDoneModal store={store} leadId={m.leadId} draft={m.draft} />}
       {m?.kind === 'rejectLead' && <RejectLeadModal store={store} leadId={m.leadId} />}
       {m?.kind === 'activityRecords' && <ActivityRecords store={store} go={go} Modal={Modal} side={m.side} date={m.date} from={m.from}
         person={m.person} measure={m.measure} detail={m.detail} title={m.title} />}
@@ -1907,24 +1907,26 @@ function RemarkModal({ store, recordType, recordId, draft = '' }) {
 // what finishes it (completeFollowUp, server-side — the same write the
 // history's "Add outcome" makes). The form is the history's own (OutcomeForm).
 // A site visit never comes here: it is logged with proof (VisitProofModal).
-function FollowUpDoneModal({ store, leadId }) {
+function FollowUpDoneModal({ store, leadId, draft }) {
   const l = store.lookup('lead', leadId)
-  const [outcome, setOutcome] = useState('')
-  const [note, setNote] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [outcome, setOutcome] = useState(draft?.outcome || '')
+  const [note, setNote] = useState(draft?.note || '')
   if (!l?.followUp) return null
-  const save = async () => {
+  // Closes at once; the row leaves with it (store.completeFollowUp). Refused,
+  // the booking comes back and so does this, with what was picked and typed.
+  const save = () => {
     if (!outcome) { store.toast('Pick how it went', 'warn'); return }
-    setBusy(true)
-    const res = await store.completeFollowUp(l.id, outcome, note.trim())
-    setBusy(false)
-    if (res) store.closeModal()
+    const said = { outcome, note: note.trim() }
+    store.closeModal()
+    store.completeFollowUp(l.id, said.outcome, said.note).then(res => {
+      if (!res) store.openModal({ kind: 'followUpDone', leadId: l.id, draft: said })
+    })
   }
   return (
-    <Modal title={`${followUpAction(l.followUp) || 'Follow-up'}: ${personLabel(l)}`} onClose={busy ? () => {} : store.closeModal} width={420}>
+    <Modal title={`${followUpAction(l.followUp) || 'Follow-up'}: ${personLabel(l)}`} onClose={store.closeModal} width={420}>
       <OutcomeForm line={followUpLabel(l.followUp)} outcomes={VISIT_OUTCOMES} blank="How did it go?"
         outcome={outcome} onOutcome={setOutcome} text={note} onText={setNote} placeholder="What happened?"
-        autoFocus={false} saving={busy} footClass="mfm-foot" onCancel={store.closeModal} onSave={save} />
+        autoFocus={false} footClass="mfm-foot" onCancel={store.closeModal} onSave={save} />
     </Modal>
   )
 }
