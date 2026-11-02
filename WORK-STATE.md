@@ -1,14 +1,14 @@
 # Work state
 
 ## Now
-Actions feel slow (Om 2 Nov). Merged on development: shortlist bursts (7 taps → 2 requests) and rename undo 2.9s → 1.2s (b-speed), a sold/rented flat on a lead shows its status and cannot be ticked (71d4f4b); auth check 2–4 → 1 round trip per request (a-auth-speed, reviewed; review's fail-open finding fixed in 40b1a15); shell requests once per screen (desk Calling 11 → 7 at once, phone screens 8–10 → 4), a write refreshes only what it changed (status change 6 → 2 requests after the tap), owner status/callback/close show in ~40ms instead of 2.3–2.7s, close is one request, the repeated "Stage → Contacted" line stopped (b-speed2); smoke 41/41. All on development, not live: next release needs Om's go.
+Actions feel slow (Om 2 Nov). Merged on development: shortlist bursts (7 taps → 2 requests) and rename undo 2.9s → 1.2s (b-speed), a sold/rented flat on a lead shows its status and cannot be ticked (71d4f4b); auth check 2–4 → 1 round trip per request (a-auth-speed, reviewed; review's fail-open finding fixed in 40b1a15); shell requests once per screen (desk Calling 11 → 7 at once, phone screens 8–10 → 4), a write refreshes only what it changed (status change 6 → 2 requests after the tap), owner status/callback/close show in ~40ms instead of 2.3–2.7s, close is one request, the repeated "Stage → Contacted" line stopped (b-speed2); assign 1.6–2.2s → 0.03s, Today Done 2.1s → 0.05s, rota hand-out of 16 leads 9.4s → 2.4s (b-speed3, reviewed); smoke 41/41. All on development, not live: next release needs Om's go.
 Release 2 (c440165) is live on both halves; backup nightly on the EC2 (STATE.md).
 
 ## Next
 D1. Waits on Om: daily date refresh for production demo firms (urban, raipur, …) — today only the development db refreshes; it is a daily production write limited to demo firms (recommended yes, measure first, review)
 D2. Waits on Om: #153 intro wording (drafts given 2 Nov) and what is wrong with today's share message
 D3. Waits on Om: the delpat production login, for the signed-in live check
-S1. Speed, what is left of the 2 Nov audit: Record call = one endpoint (contact-log + editRemark + callback in sequence today); inline assign and AssignModal optimistic, notify after responding; Today "Done" leaves at once; updateLead reads the lead twice; hand-out rota N locked queries → `dealRota(n)`; moveAll per-target loop; property edit per-field events; verifyProperty labelled optimistic but is not
+S1. Speed, left of the 2 Nov audit: Record call = one endpoint — waits on the after-call sheet (UI review P1)
 0. UI review (docs/specs/ui-review.md, published for Om): waits on Om picking proposals; recommended P1 after-call sheet + P3 one word one number
 1. Phone UI and UX, new from the user flows (the earlier spec 9d5b0f7 rearranged the current screens and is superseded): the fresh design is on `b-phone-redesign` (c7e7aa1, docs/specs/phone-ui/) and published for Om. Waits on his review and its 9 decisions plus follow-ups D1–D5. Then slice 1: the after-call sheet, its `call-result` write, ack + Undo. Built on its own branch, merged only when Om approves it whole
 2. Feed watch: owner alert merged (28a7fe9); production read 28 Oct: 0 alerts at bhumi/mahalaxmi, 2 at delpat. Delpat half (console view, a daily email to Om via sendMail) waits on Om
@@ -18,6 +18,7 @@ S1. Speed, what is left of the 2 Nov audit: Record call = one endpoint (contact-
 6. Work OS #129 help desk (#156 demos feed it)
 
 ## Later
+- Two rota hand-outs racing on one record can write an assignment line with a stale "from" (moveAll's `was` CTE reads the snapshot; last writer wins, no double assignment) — waits on it being seen
 - A firm's weekly off for "days worked" — waits on how the firms actually work
 - Alerts are stamped with the app's clock and links/events with the database's; on a skewed host (this PC: DB 2.5s ahead) "a fresh link after the alert" closes a tap made right after a send — waits on checking the AWS host's skew
 - Idle-owner sweep threw after its first owner since 23 Sep (fixed in review 3) — waits on a read-only prod check of which firms had `owner_reassign_idle_enabled`
