@@ -646,6 +646,11 @@ function reducer(state, action) {
       return { ...state, doneBookings: next }
     }
 
+    // An optimistic change the server refused, put back exactly as it was:
+    // undoing through ASSIGN or UPDATE_LEAD wrote a history line of its own.
+    case 'RESTORE_RECORD':
+      return action.record ? cacheOne(state, action.kind, action.record) : state
+
     case 'FOLLOWUP': {
       // fu === null means "marked done" — clearing the appointment, not setting one.
       //
@@ -821,6 +826,9 @@ function reducer(state, action) {
 
 export function StoreProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initial)
+  // The window open NOW, for a reply that lands after the screen has moved on.
+  const modalNow = useRef(null)
+  modalNow.current = state.modal
   // The firm's names for its fixed lead stages (pipelineRoles.js), set during
   // render rather than in an effect: every tag drawn in this same render must
   // already say "Booked", not flash "Deal Closed" first.
@@ -1389,10 +1397,10 @@ export function StoreProvider({ children }) {
     // assignment history; the reply replaces this guess (adopt).
     assign: (leadId, agentId) => {
       const a = state.agents.find(x => x.id === agentId)
-      const prev = api.lookup('lead', leadId)?.agentId ?? null
+      const before = api.lookup('lead', leadId)
       return optimistic('Assign',
         () => dispatch({ type: 'ASSIGN', leadId, agentId }),
-        () => dispatch({ type: 'UPDATE_LEAD', leadId, patch: { agentId: prev } }),
+        () => dispatch({ type: 'RESTORE_RECORD', kind: 'lead', record: before }),
         () => apiClient.updateLead(leadId, { agentId }).then(adopt('lead')),
         'Lead assigned to ' + (a ? a.first : ''), 'lead')
     },
@@ -1400,10 +1408,10 @@ export function StoreProvider({ children }) {
     // cell has always used (one id).
     assignRow: (kind, id, agentId) => {
       const lead = kind === 'lead'
-      const prev = api.lookup(kind, id)?.agentId ?? null
+      const before = api.lookup(kind, id)
       return optimistic('Assign',
         () => dispatch(lead ? { type: 'ASSIGN', leadId: id, agentId } : { type: 'UPDATE_OWNER', id, patch: { agentId } }),
-        () => dispatch(lead ? { type: 'UPDATE_LEAD', leadId: id, patch: { agentId: prev } } : { type: 'UPDATE_OWNER', id, patch: { agentId: prev } }),
+        () => dispatch({ type: 'RESTORE_RECORD', kind, record: before }),
         // A refusal's words are in `message` here, which optimistic() would
         // not read.
         () => (lead ? apiClient.bulkAssignLeads([id], agentId) : apiClient.bulkAssignOwners([id], agentId))
@@ -1574,10 +1582,11 @@ export function StoreProvider({ children }) {
     // the Today feed through `doneBookings`) and comes back, with a toast, if
     // the server refuses. Resolves to the reply, or null on a refusal.
     completeFollowUp: (leadId, outcome, remark) => {
-      const prev = api.lookup('lead', leadId)?.followUp ?? null
+      // The whole record, so the overdue mark comes back with the booking.
+      const before = api.lookup('lead', leadId)
       return optimistic('Follow-up',
         () => { dispatch({ type: 'FOLLOWUP', leadId, followUp: null }); dispatch({ type: 'BOOKING_DONE', leadId, on: true }) },
-        () => { dispatch({ type: 'BOOKING_DONE', leadId, on: false }); if (prev) dispatch({ type: 'FOLLOWUP', leadId, followUp: prev }) },
+        () => { dispatch({ type: 'BOOKING_DONE', leadId, on: false }); dispatch({ type: 'RESTORE_RECORD', kind: 'lead', record: before }) },
         () => apiClient.completeFollowUp(leadId, outcome, remark),
         'Saved', 'lead')
     },
@@ -1892,6 +1901,7 @@ export function StoreProvider({ children }) {
       () => dispatch({ type: 'SET_ROUTING', patch }),
       note),
     openModal: (modal) => dispatch({ type: 'SET', patch: { modal } }),
+    modalOpen: () => !!modalNow.current,
     closeModal: () => dispatch({ type: 'SET', patch: { modal: null } }),
     // Re-pull the whole desk from the server. ONLY for what the boot payload
     // actually carries — the roster, the firm's settings, the brand. It holds

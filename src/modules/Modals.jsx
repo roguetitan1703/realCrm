@@ -1913,13 +1913,15 @@ function FollowUpDoneModal({ store, leadId, draft }) {
   const [note, setNote] = useState(draft?.note || '')
   if (!l?.followUp) return null
   // Closes at once; the row leaves with it (store.completeFollowUp). Refused,
-  // the booking comes back and so does this, with what was picked and typed.
+  // the booking comes back and so does this, with what was picked and typed —
+  // unless another window is open by then: reopening over it would throw away
+  // what is being typed there. The booking is back on Today either way.
   const save = () => {
     if (!outcome) { store.toast('Pick how it went', 'warn'); return }
     const said = { outcome, note: note.trim() }
     store.closeModal()
     store.completeFollowUp(l.id, said.outcome, said.note).then(res => {
-      if (!res) store.openModal({ kind: 'followUpDone', leadId: l.id, draft: said })
+      if (!res && !store.modalOpen()) store.openModal({ kind: 'followUpDone', leadId: l.id, draft: said })
     })
   }
   return (
