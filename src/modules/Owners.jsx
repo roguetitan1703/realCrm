@@ -8,6 +8,7 @@ import { initials, callbackSignal, whenLabel } from '../lib/format.js'
 import { canAssignLead, isDeskRole } from '../lib/permissions.js'
 import { OWNER_STAGES, OWNER_TERMINAL_STATUSES, ownerSegmentsOf, isCallbackTab } from '../data/ownerStatus.js'
 import { useServerList } from '../lib/serverList.js'
+import { useRecord } from '../lib/useRecord.js'
 import { useKept, useKeptPager } from '../lib/useNav.js'
 import { useServerData } from '../lib/useServerData.js'
 import UnassignedBar from '../components/UnassignedBar.jsx'
@@ -82,13 +83,12 @@ function OwnerProjectGrid({ store, ask, def, phone, onOpen, onOpenOwner, onAssig
 // Owners) because it holds hooks of its own — rendering it from partway through
 // the list component would change the hook count between the two views.
 function OwnerRecord({ store, ownerId, topBar, phone, onBack, go }) {
-  const cached = store.lookup('owner', ownerId)
-  // Reload or a deep link lands here with nothing cached. Fetching also gets
-  // the timeline, which the list rows never carry.
-  const { data: fetched } = useServerData(
-    () => api.getOwner(ownerId).then(r => r?.owner || null),
-    [ownerId, store.state.dataAsOf], null)
-  const o = fetched || cached
+  // THE CACHED RECORD, which every write patches. This read
+  // `fetched || cached`, so a copy fetched before a status change or a
+  // callback beat the patched one and the record showed the old value until
+  // the next read. useRecord fetches what the cache lacks (a list row has no
+  // history), keeps it in the cache, and does not re-read a write's own reply.
+  const { record: o } = useRecord(store, 'owner', ownerId)
   if (!o) {
     return (
       <>

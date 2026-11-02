@@ -4434,6 +4434,15 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
       author: ctx.actorId ?? getContext()?.userId ?? 'System',
     });
   }
+  // A REMARK SENT WITH THE CHANGE — closing an owner says why in the same
+  // request. It was a second request after this one, so the reply never held
+  // it and a lost second request left a closed owner with no reason written.
+  // Written before the read below so the reply carries it.
+  const remark = typeof patch.remark === 'string' ? patch.remark.trim() : '';
+  if (remark) {
+    await addTimelineEvent({ record_id: id, type: 'remark', title: 'Remark', description: remark,
+      author: ctx.actorId ?? getContext()?.userId ?? undefined });
+  }
   const updated = await getOwnerById(id);
   audit({
     tenant_id: t, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,

@@ -20,6 +20,7 @@ import { api, hasPendingWrites } from './api.js'
 const FETCHERS = {
   property: (id) => api.getProperty(id).then(r => r?.property || null),
   lead: (id) => api.getLead(id).then(r => r?.lead || r?.record || null),
+  owner: (id) => api.getOwner(id).then(r => r?.owner || null),
 }
 
 /**

@@ -505,6 +505,11 @@ function reducer(state, action) {
       return patchRecord(state, action.kind, action.id, r => ({
         ...r, timeline: [action.event, ...(r.timeline || [])],
       }))
+    // A remark shown before the server had it, and then refused.
+    case 'DROP_TIMELINE_EVENT':
+      return patchRecord(state, action.kind, action.id, r => ({
+        ...r, timeline: (r.timeline || []).filter(e => e.id !== action.eventId),
+      }))
     case 'EDIT_TIMELINE_EVENT':
       return patchRecord(state, action.kind, action.id, r => ({
         ...r,
@@ -1300,6 +1305,13 @@ export function StoreProvider({ children }) {
     return res
   }, [])
 
+  // An owner's PATCH answers `{ owner }`, the whole record with its history.
+  const adoptOwner = useCallback((res) => {
+    const rec = res?.owner
+    if (rec?.id && res?.success !== false) dispatch({ type: 'CACHE_RECORDS', kind: 'owner', records: [rec], adopted: true })
+    return res
+  }, [])
+
   // Each listing's photo saves, chained so they reach the server in order.
   const mediaQueue = useRef({})
   const optimistic = useCallback((what, apply, revert, call, okMsg, kind) => {
@@ -1425,22 +1437,28 @@ export function StoreProvider({ children }) {
     // server. While the browser wrote that line itself the row was there
     // instantly and the slow refetch behind it went unnoticed — so this is the
     // same write costing a round trip it had already paid for.
-    setFollowUp: (leadId, followUp) => {
+    setFollowUp: (leadId, followUp, okMsg) => {
       const prev = api.lookup('lead', leadId)?.followUp ?? null
       return optimistic('Follow-up',
         () => dispatch({ type: 'FOLLOWUP', leadId, followUp }),
         () => dispatch({ type: 'FOLLOWUP', leadId, followUp: prev }),
         () => apiClient.updateLead(leadId, { followUp }).then(adopt('lead')),
-        'Follow-up set and added to the calendar', 'lead')
+        okMsg || 'Follow-up set and added to the calendar', 'lead')
     },
     // The status and its booked call in ONE write: the server refuses a
     // Callback from a person with no call booked, so the two cannot be sent
     // one after the other.
-    setCallback: (leadId, followUp) => write('Callback',
-      () => apiClient.updateLead(leadId, { stage: CALLBACK_STATUS, followUp }).then(adopt('lead')),
-      // The reply is the record (adopt); nothing to patch on top of it.
-      null,
-      'Callback booked', 'lead'),
+    // Optimistic like setFollowUp: the picker closes on Save and the row shows
+    // the callback at once; a refusal puts both back. The reply is the record.
+    setCallback: (leadId, followUp) => {
+      const l = api.lookup('lead', leadId)
+      const prevStage = l?.stage, prevFu = l?.followUp ?? null
+      return optimistic('Callback',
+        () => { dispatch({ type: 'STAGE', leadId, stage: CALLBACK_STATUS }); dispatch({ type: 'FOLLOWUP', leadId, followUp }) },
+        () => { if (prevStage) dispatch({ type: 'STAGE', leadId, stage: prevStage }); dispatch({ type: 'FOLLOWUP', leadId, followUp: prevFu }) },
+        () => apiClient.updateLead(leadId, { stage: CALLBACK_STATUS, followUp }).then(adopt('lead')),
+        'Callback booked', 'lead')
+    },
     // `logEvent` used to dispatch a timeline entry into local React state and
     // toast "Call logged" — with no request behind it. The entry was gone on
     // the next reload and no teammate ever saw it. It goes through the same
@@ -1455,13 +1473,23 @@ export function StoreProvider({ children }) {
     // Remark thread (B1) — real persistence, not the old client-only note echo.
     // kind = 'lead' | 'property' | 'owner'.
     // Resolves true once saved, so a caller can keep its text on a refusal.
+    // OPTIMISTIC: the remark is on the record the moment it is sent, and the
+    // server's event replaces it when it lands (or it comes off, with a toast).
+    // One held by the outbox while offline stays, as the outbox says.
     addRemark: (kind, id, text) => {
+      const tempId = 'tmp_' + Date.now().toString(36)
+      dispatch({ type: 'ADD_TIMELINE_EVENT', kind, id, event: {
+        id: tempId, type: 'remark', label: text, authorId: state.activeAgentId || null,
+        timestamp: new Date().toISOString(), metadata: {},
+      } })
+      const drop = (msg) => { dispatch({ type: 'DROP_TIMELINE_EVENT', kind, id, eventId: tempId }); toast(msg, 'warn'); return false }
       return apiClient.addRemark(id, text)
         .then(res => {
-          if (res?.success && res.timeline_event) { dispatch({ type: 'ADD_TIMELINE_EVENT', kind, id, event: res.timeline_event }); toast('Remark added'); return true }
-          toast('Could not save the remark', 'warn'); return false
+          if (res?.queued) return true
+          if (res?.success && res.timeline_event) { dispatch({ type: 'EDIT_TIMELINE_EVENT', kind, id, eventId: tempId, event: res.timeline_event }); toast('Remark added'); return true }
+          return drop('Could not save the remark')
         })
-        .catch(err => { console.warn('[Remark API] error:', err.message); toast('Could not save the remark. Try again.', 'warn'); return false })
+        .catch(err => { console.warn('[Remark API] error:', err.message); return drop('Could not save the remark. Try again.') })
     },
     // THE SERVER'S EVENT, WHOLE. This rebuilt the row from the two values it
     // had sent — so a locked row (a booking) took the agent's note as its
@@ -1632,14 +1660,38 @@ export function StoreProvider({ children }) {
         dispatch({ type: 'ADD_OWNER', owner: created?.id ? created : owner })
       },
       null),
-    setOwnerStage: (id, stage) => write('Status change',
-      () => apiClient.updateOwner(id, { stage }),
-      () => dispatch({ type: 'SET_OWNER_STAGE', id, stage }),
-      'Status → ' + stage),
+    // OPTIMISTIC, as a lead's status is: the row moved only when the server
+    // answered (~1.5s on a phone), and then the record could still show the
+    // copy read before it. The reply is the whole owner, kept as the record.
+    setOwnerStage: (id, stage) => {
+      const prev = api.lookup('owner', id)?.stage
+      return optimistic('Status change',
+        () => dispatch({ type: 'SET_OWNER_STAGE', id, stage }),
+        () => { if (prev !== undefined) dispatch({ type: 'SET_OWNER_STAGE', id, stage: prev }) },
+        () => apiClient.updateOwner(id, { stage }).then(adoptOwner),
+        'Status → ' + stage, 'owner')
+    },
     updateOwner: (id, patch) => write('Update owner',
-      () => apiClient.updateOwner(id, patch),
+      () => apiClient.updateOwner(id, patch).then(adoptOwner),
       () => dispatch({ type: 'UPDATE_OWNER', id, patch }),
-      'Owner details updated'),
+      'Owner details updated', 'owner'),
+    // CLOSING ONE, with its reason as a remark, in ONE request: it was the
+    // update and then a remark, one after the other. Optimistic like the
+    // status. An API older than this build does not take `remark`, and then
+    // the remark is sent on its own as before.
+    rejectOwner: (id, patch, remark) => {
+      const prev = api.lookup('owner', id)
+      const before = prev ? { stage: prev.stage, rejectionReason: prev.rejectionReason ?? null, callbackAt: prev.callbackAt ?? null, callbackNote: prev.callbackNote ?? null } : null
+      return optimistic('Close owner',
+        () => dispatch({ type: 'UPDATE_OWNER', id, patch }),
+        () => { if (before) dispatch({ type: 'UPDATE_OWNER', id, patch: before }) },
+        () => apiClient.updateOwner(id, { ...patch, remark }).then(adoptOwner).then(res => {
+          const said = (res?.owner?.timeline || []).some(e => e.type === 'remark' && String(e.label || '').includes(remark))
+          if (res?.success && !said) return apiClient.addRemark(id, remark).then(() => res).catch(() => res)
+          return res
+        }),
+        'Status → ' + patch.stage, 'owner')
+    },
     // A callback is one moment, so it travels as one ISO timestamp — not the
     // lead follow-up's {date,time,action}, where 'Today' is a display string
     // the server has to guess a date from. It leaves the status alone: Callback
@@ -1650,10 +1702,15 @@ export function StoreProvider({ children }) {
       const patch = at
         ? { callbackAt: at, callbackNote: note || null }
         : { callbackAt: null, callbackNote: null }
-      return write('Schedule callback',
-        () => apiClient.updateOwner(id, patch),
+      // Optimistic: Done on the card and Save in the picker change the row at
+      // once, and put it back if the server refuses.
+      const o = api.lookup('owner', id)
+      const before = { callbackAt: o?.callbackAt ?? null, callbackNote: o?.callbackNote ?? null }
+      return optimistic('Schedule callback',
         () => dispatch({ type: 'UPDATE_OWNER', id, patch }),
-        at ? 'Callback scheduled' : 'Callback cleared')
+        () => dispatch({ type: 'UPDATE_OWNER', id, patch: before }),
+        () => apiClient.updateOwner(id, patch).then(adoptOwner),
+        at ? 'Callback scheduled' : 'Callback cleared', 'owner')
     },
     deleteOwner: (ids) => api.deleteMany('owner', ids),
     // A partial delete is the outcome that has to be reported honestly: five of
