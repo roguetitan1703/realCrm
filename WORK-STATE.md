@@ -1,7 +1,7 @@
 # Work state
 
 ## Now
-Actions feel slow (Om 2 Nov). Merged on development: shortlist bursts (7 taps → 2 requests) and rename undo 2.9s → 1.2s (b-speed), a sold/rented flat on a lead shows its status and cannot be ticked (71d4f4b); smoke 41/41. A's auth change (a9a7506 on `a-auth-speed`, 2–4 → 1 round trip per request) is in security review before merge.
+Actions feel slow (Om 2 Nov). Merged on development: shortlist bursts (7 taps → 2 requests) and rename undo 2.9s → 1.2s (b-speed), a sold/rented flat on a lead shows its status and cannot be ticked (71d4f4b); auth check 2–4 → 1 round trip per request (a-auth-speed, reviewed; review's fail-open finding fixed in 40b1a15); smoke 41/41. B on `b-speed2`: shell requests once per screen, narrower refresh after writes, optimistic owner status/callback/remark.
 Release 2 (c440165) is live on both halves; backup nightly on the EC2 (STATE.md).
 
 ## Next
