@@ -4760,7 +4760,7 @@ export async function assignUnowned(side: 'leads' | 'owners', ctx: ActorCtx = SY
     pool = ids.map((_, i) => chosen[i % chosen.length]);
   } else {
     pool = side === 'leads'
-      ? await Promise.all(ids.map(() => nextRoutedAgent()))
+      ? await nextRoutedAgents(ids.length)
       : await nextRoutedOwnerAgents(ids.length);
   }
 
@@ -6272,6 +6272,23 @@ export function autoAssigns(rules: RoutingRule, side: 'leads' | 'owners'): boole
 export async function arrivalLeadAgent(): Promise<string | null> {
   if (!autoAssigns(await getRoutingRules(), 'leads')) return null;
   return nextRoutedAgent();
+}
+
+/**
+ * N TURNS OF THE LEADS ROTA, claimed in one statement — what nextRoutedAgent
+ * does once, the way the owners side already deals a batch. A hand-out of 16
+ * unowned leads ran 16 nextRoutedAgent() calls at once, each locking the same
+ * crm_routing_rules row in turn (~9s on dev for 16). Same order, same
+ * fallback: with nobody on the rota who can take work, each record goes to
+ * someone on duty at random.
+ */
+async function nextRoutedAgents(n: number): Promise<(string | null)[]> {
+  if (n <= 0) return [];
+  const dealt = await dealRota('leads', n);
+  if (dealt.length) return dealt;
+  const pool = await onDutyWorkers(tid());
+  if (!pool.length) return new Array(n).fill(null);
+  return Array.from({ length: n }, () => pool[Math.floor(Math.random() * pool.length)]);
 }
 
 async function nextRoutedAgent(): Promise<string | null> {
