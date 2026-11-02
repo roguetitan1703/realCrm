@@ -5,7 +5,7 @@ import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Timeline, Avatar, CappedList } from '../components/primitives.jsx'
 import { asList, initials, unitLabel, budgetRange, whenLabel, followUpLabel, nextWhenLabel, isCallbackLead, followUpOverdue, followUpAction, nextStepOf, money, dealWord } from '../lib/format.js'
 import { personLabel, telLink } from '../lib/phone.js'
-import { matchesForLead } from '../lib/matching.js'
+import { matchesForLead, canSend } from '../lib/matching.js'
 import { useRecord } from '../lib/useRecord.js'
 import { canEditLead, canAssignLead, canDeleteRecord, isDeskRole } from '../lib/permissions.js'
 import { LEAD_STATUSES } from '../data/leadStatus.js'
@@ -485,7 +485,12 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
     ...(shareRows || []).filter((r, i, a) => r.propertyId && !shortlistIds.includes(r.propertyId) && !matches.some(m => m.id === r.propertyId)
       && a.findIndex(x => x.propertyId === r.propertyId) === i)
       .map(r => { const p = byId(r.propertyId) || { id: r.propertyId, society: r.title || 'Property' }; return { p, shortlisted: false, line: quotedShort(p) } }),
-  ].sort((a, b) => (fbMap[a.p.id]?.verdict === 'rejected' ? 1 : 0) - (fbMap[b.p.id]?.verdict === 'rejected' ? 1 : 0))
+  ].sort((a, b) => (fbMap[a.p.id]?.verdict === 'rejected' ? 1 : 0) - (fbMap[b.p.id]?.verdict === 'rejected' ? 1 : 0)
+    || (canSend(a.p) ? 0 : 1) - (canSend(b.p) ? 0 : 1))
+  // A shortlisted or liked flat that has since sold stays on the record, but
+  // it cannot be ticked: one of them in a send made the server refuse the
+  // whole link ("These homes are no longer available").
+  const tickable = propRows.filter(r => canSend(r.p))
 
   // One home's sends, folded: the latest send, every open, the last open, and
   // whether any of them got an I'm interested.
@@ -506,8 +511,8 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
     }
   }
   const toggleTick = (id) => setTicked(t => { const n = new Set(t); if (n.has(id)) n.delete(id); else n.add(id); return n })
-  const allTicked = propRows.length > 0 && propRows.every(r => ticked.has(r.p.id))
-  const sendTicked = () => openSend(store, propRows.filter(r => ticked.has(r.p.id)).map(r => r.p), {
+  const allTicked = tickable.length > 0 && tickable.every(r => ticked.has(r.p.id))
+  const sendTicked = () => openSend(store, tickable.filter(r => ticked.has(r.p.id)).map(r => r.p), {
     leadId: l.id, lead: l, onSent: () => setTicked(new Set()),
   })
 
@@ -669,11 +674,11 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
           {/* Tick one, some or all, then Send — the lead is the recipient.
               The row sticks under the top bar while the list scrolls, so Send
               is in reach from the tenth home as well as the first. */}
-          {(propRows.length > 1 || ticked.size > 0) && (
+          {(tickable.length > 1 || ticked.size > 0) && (
             <div className={'inv-all' + (ticked.size ? ' is-on' : '')}>
-              {propRows.length > 1 && (
+              {tickable.length > 1 && (
                 <button type="button" className={'pick-box' + (allTicked ? ' on' : '')} aria-pressed={allTicked} aria-label="Select all"
-                  onClick={() => setTicked(allTicked ? new Set() : new Set(propRows.map(r => r.p.id)))}><span><Icon name="check" size={13} /></span></button>
+                  onClick={() => setTicked(allTicked ? new Set() : new Set(tickable.map(r => r.p.id)))}><span><Icon name="check" size={13} /></span></button>
               )}
               <span className="inv-all-t">{ticked.size ? `${ticked.size} selected` : 'Select all'}</span>
               {ticked.size > 0 && <button type="button" className="lnk inv-all-x" onClick={() => setTicked(new Set())}>Clear</button>}
@@ -684,11 +689,13 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
             const fb = (l.feedback || {})[row.p.id]
             const rejected = fb?.verdict === 'rejected'
             const sent = sentOf[row.p.id]
-            const on = ticked.has(row.p.id)
+            const gone = !canSend(row.p)
+            const on = !gone && ticked.has(row.p.id)
             return (
-              <div key={row.p.id} className={'invrow' + (i || propRows.length > 1 ? ' relrow-div' : '') + (rejected ? ' invrow-rej' : '')}>
-                <button type="button" className={'pick-box' + (on ? ' on' : '')} aria-pressed={on}
-                  aria-label={`${on ? 'Untick' : 'Tick'} ${row.p.society || 'this home'}`} onClick={() => toggleTick(row.p.id)}>
+              <div key={row.p.id} className={'invrow' + (i || propRows.length > 1 ? ' relrow-div' : '') + (rejected || gone ? ' invrow-rej' : '')}>
+                <button type="button" className={'pick-box' + (on ? ' on' : '')} aria-pressed={on} disabled={gone}
+                  aria-label={gone ? `${row.p.society || 'This home'} is ${row.p.status}` : `${on ? 'Untick' : 'Tick'} ${row.p.society || 'this home'}`}
+                  onClick={() => toggleTick(row.p.id)}>
                   <span><Icon name="check" size={13} /></span>
                 </button>
                 <button className="invrow-main" onClick={() => go('properties', { propId: row.p.id, propOpen: true })}>
@@ -701,6 +708,7 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
                     {sent?.interested > 0 && sent?.tapFrom !== 'someone' && <span className="fit int fit-tight">Interested</span>}
                     {fb?.verdict === 'liked' && <span className="fit ok fit-tight">👍 Liked</span>}
                     {rejected && <span className="fit no fit-tight">👎 {fb.reason}</span>}
+                    {gone && <span className="fit no fit-tight">{row.p.status}</span>}
                     {!fb && !(sent?.interested > 0 && sent?.tapFrom !== 'someone') && row.shortlisted &&
                       <span className="fit ok fit-tight"><Icon name="check" size={11} />Shortlisted</span>}
                   </div>

@@ -16,16 +16,22 @@ import {
 // buyers for a listing are computed on the server with it (the card's count
 // and the record's list, GET /properties/:id/buyers); a lead's matching flats
 // are scored here with it, over the candidates the server narrowed.
+/** Whether a flat can go in a link: the server's rule (sharing.ts isAvailable),
+ *  Available or no status set. Anything else is refused at send. */
+export const canSend = (p) => /^available$/i.test(String(p?.status || 'Available'))
+
 export function matchesForLead(lead, allProps = []) {
   if (!lead?.req || !allProps?.length) return []
+  // A match that cannot be sent is not a match. This was a list of the
+  // statuses that rule a flat out, so "Rented", "Under offer" or any status a
+  // firm added came through as a match the send then refused.
   // EVERYTHING THEY HAVE ASKED FOR, not the latest point — 2–3 BHK and
   // ₹68L–₹95L, where the record shows two enquiries at either end. askedFor()
   // widens the lead's own requirement by its enquiry history, and it is the
   // same span the server narrows the book on.
   const r = askedFor(lead)
-  const UNAVAILABLE = ['Sold', 'Leased', 'Off-Market', 'Blocked', 'Closed', 'Let']
   return allProps
-    .filter(p => !UNAVAILABLE.includes(p.status))
+    .filter(canSend)
     .map(p => {
       const m = pairFit(p, r)
       if (!m) return null
