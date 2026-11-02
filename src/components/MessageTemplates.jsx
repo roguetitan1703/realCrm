@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Button } from './primitives.jsx'
-import Icon from './Icon.jsx'
+import { Folded } from './RangeView.jsx'
 import { isDeskRole } from '../lib/permissions.js'
 import { DEFAULT_WHATSAPP_INTRO, DEFAULT_OWNER_INTRO, leadIntroTemplate } from '../data/theme.js'
 import { DEFAULT_SHARE_TEMPLATE, SHARE_TOKENS, shareTemplate } from '../data/shareMessage.js'
@@ -13,7 +13,8 @@ import { DEFAULT_SHARE_TEMPLATE, SHARE_TOKENS, shareTemplate } from '../data/sha
  *   To an owner      filled in from an owner on the calling list
  *   Property link    filled in by the server when a link is made
  *
- * Each is one line until it is tapped: three open textareas were a wall.
+ * Each is one line until it is tapped (Folded, as Settings → Outcomes):
+ * three open textareas were a wall.
  *
  * Desk only. Hiding an editor is not a permission: the server refuses a
  * settings write from an agent outright (routes/workspace.ts).
@@ -68,7 +69,6 @@ function putSharing(store, patch, note) {
 // now says "template" so it is not mistaken for the message itself, and the
 // token buttons under it show what gets filled in, which is the explanation.
 function TemplateEditor({ title, value, fallback, tokens, rows = 4, onSave, onReset }) {
-  const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState(value)
   // The stored value can change under an open editor — another tab saving, or
   // the desk state reloading after a save. Following it blindly would wipe what
@@ -85,13 +85,9 @@ function TemplateEditor({ title, value, fallback, tokens, rows = 4, onSave, onRe
   const insert = (t) => setDraft(prev => (prev && !prev.endsWith(' ') ? prev + ' ' : prev) + t)
 
   return (
-    <section className={'msgt-card msgt-fold' + (open ? ' open' : '')}>
-      <button type="button" className="msgt-h msgt-fold-t" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <span>{title}</span>
-        {dirty && <span className="msgt-dirty" />}
-        <Icon name={open ? 'chevUp' : 'chevDown'} size={15} className="msgt-go" />
-      </button>
-      {open && <>
+    // The draft lives here, above the fold, so closing it keeps what was typed.
+    <Folded title={title}>
+      <div>
       <div className="msgt-ph">
         {tokens.map(t => (
           <button key={t} type="button" className="msgt-tok" onClick={() => insert(t)}>+ {t}</button>
@@ -109,7 +105,7 @@ function TemplateEditor({ title, value, fallback, tokens, rows = 4, onSave, onRe
           Reset to default
         </Button>
       </div>
-      </>}
-    </section>
+      </div>
+    </Folded>
   )
 }

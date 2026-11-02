@@ -2308,11 +2308,6 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .msgt-ph code{font-family:var(--mono);font-size:11px;background:var(--card-2,var(--wash));border:1px solid var(--line);border-radius:5px;padding:3px 7px;color:var(--ink-2)}
 .msgt-t{width:100%;margin-bottom:8px;font-size:13px;line-height:1.5}
 .msgt-foot{display:flex;gap:9px;margin-top:6px}
-.msgt-card.msgt-fold{padding:12px 16px;margin-bottom:8px}
-.msgt-card.msgt-fold.open{padding-bottom:16px}
-.msgt-fold-t{display:flex;align-items:center;gap:8px;width:100%;border:none;background:none;padding:0;font:inherit;font-weight:700;font-size:14px;color:var(--ink);cursor:pointer;text-align:left;min-height:28px}
-.msgt-fold-t .msgt-go{margin-left:auto;color:var(--muted)}
-.msgt-dirty{width:7px;height:7px;border-radius:50%;background:var(--accent)}
 
 /* A segment that is a problem, not a stage — only while it has a count. */
 .segpill.alert{color:var(--danger,#B4453C)}
