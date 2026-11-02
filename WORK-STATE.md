@@ -35,7 +35,7 @@ S2. Bug: `noteOwnerContact` (store.ts ~4740) reportedly writes "Stage → Contac
 - The firm logo renders as a broken image in the desk sidebar (seen on delpat, dev) — waits on checking brand_config's logo URL
 - On a phone, an owner's or manager's Calling tab badge counts their own late callbacks (Today's feed is theirs) while their Calling list shows the firm's — waits on the owner's phone pages in the redesign
 - `webhookSender.ts` (outbound webhooks) has no caller and its menu entry is gone — waits on deciding to delete it or build outbound webhooks
-- Backups stay on the EC2 only (no off-box copy, BACKUP_COPY_TO unset): a lost box loses them — waits on Om picking a second place
+- Backups stay on the EC2 only (no off-box copy, BACKUP_COPY_TO unset): a lost box loses them — waits on Work OS #172 (a standalone backup service for every product's database)
 - The EC2 has a pending kernel upgrade (needs a reboot); check `pm2 startup`/`pm2 save` brings re-api back before rebooting — waits on Om choosing a quiet hour
 - Regression test suite (there are no tests: 0 test files): agent-phone, owner-desk and permission flows as Playwright + API tests, run before every push to main — parked by Om 28 Oct, builder S or A later; the smoke tests in tests/smoke/ (s-smoke) are its seed
 - Dev API (api.dev.re.delpat.in, re-api-dev on the EC2) answers 502 (28 Oct) — waits on Om looking at PM2 on the box
