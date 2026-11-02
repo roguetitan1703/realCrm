@@ -2,7 +2,7 @@ import { Avatar } from '../../components/primitives.jsx'
 import ThisDevice from '../../components/ThisDevice.jsx'
 import Icon from '../../components/Icon.jsx'
 import MessageTemplates from '../../components/MessageTemplates.jsx'
-import { roleLabel } from '../../lib/permissions.js'
+import { roleLabel, isDeskRole } from '../../lib/permissions.js'
 import { MePhone, MyLinks } from '../../components/MyLinks.jsx'
 
 export default function PhoneMe({ store, me, topBar, go }) {
@@ -57,9 +57,11 @@ export default function PhoneMe({ store, me, topBar, go }) {
             Message templates renders. Two editors over one sentence do not
             stay in agreement; this screen had its own, committing on blur,
             while the desk's committed on a button. */}
-        <div className="msgt-wrap">
-          <MessageTemplates store={store} />
-        </div>
+        {isDeskRole(store.state.role) && (
+          <div className="msgt-wrap">
+            <MessageTemplates store={store} />
+          </div>
+        )}
 
       </div>
     </>

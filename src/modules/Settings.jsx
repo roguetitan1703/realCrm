@@ -26,7 +26,7 @@ const NAV = [
   { key: 'routing', label: 'Assigning', icon: 'team' },
   // Key kept — it is in the URL of every Settings link anyone has sent.
   { key: 'followup', label: 'Response times', icon: 'clock' },
-  { key: 'messages', label: 'Message templates', icon: 'wa', everyone: true },
+  { key: 'messages', label: 'Message templates', icon: 'wa' },
   // Links and the public catalogue (listing-pages.md §A): how long a link
   // lives, what the catalogue shows, the embed code, and the owner's stop.
   { key: 'sharing', label: 'Sharing', icon: 'share' },
